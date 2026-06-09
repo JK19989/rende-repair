@@ -24,7 +24,12 @@
 <body class="bg-slate-50">
   <div id="root"></div>
 
-  <script type="text/babel">
+  <!-- 注意：為了啟用 Firebase 雲端功能，這裡必須加上 data-type="module" -->
+  <script type="text/babel" data-type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, setDoc, collection, onSnapshot, deleteDoc, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
     const { useState, useEffect, useMemo, useCallback } = React;
 
     // ==========================================
@@ -93,7 +98,6 @@
       return <span className={`${colorClass} px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap`}>{level || '未設定'}</span>;
     };
 
-    // 保固狀態計算函式
     const calculateWarranty = (purchaseDate, usefulLife) => {
       if (!purchaseDate || !usefulLife) return { valid: false, text: '資料不全', color: 'text-slate-400', icon: null };
       const start = new Date(purchaseDate);
@@ -362,26 +366,21 @@
       );
     };
 
-    // 4. 財產管理 (擴充欄位與編輯)
-    const AssetsPage = ({ showToast }) => {
-      const [assets, setAssets] = useState(() => JSON.parse(localStorage.getItem('sys_assets') || '[]'));
+    // 4. 財產管理
+    const AssetsPage = ({ assets, onAddAsset, onEditAsset, onDeleteAsset, showToast }) => {
       const [newAsset, setNewAsset] = useState({ id: '', name: '', category: CATEGORIES[0], ipAddress: '', purchaseDate: '', usefulLife: 5, status: '正常' });
       const [editingAssetId, setEditingAssetId] = useState(null);
       const [editAssetData, setEditAssetData] = useState(null);
 
-      useEffect(() => { localStorage.setItem('sys_assets', JSON.stringify(assets)); }, [assets]);
-
       const handleAdd = (e) => {
         e.preventDefault();
-        setAssets([...assets, { ...newAsset, uid: Date.now() }]);
+        onAddAsset({ ...newAsset, uid: Date.now().toString() });
         setNewAsset({ id: '', name: '', category: CATEGORIES[0], ipAddress: '', purchaseDate: '', usefulLife: 5, status: '正常' });
-        showToast("✅ 資產新增成功");
       };
 
       const handleSaveEdit = () => {
-        setAssets(assets.map(a => a.uid === editingAssetId ? editAssetData : a));
+        onEditAsset(editingAssetId, editAssetData);
         setEditingAssetId(null);
-        showToast("✅ 資產更新成功");
       };
 
       return (
@@ -391,7 +390,6 @@
             <h2 className="text-xl font-bold text-slate-800">資訊財產管理</h2>
           </div>
           
-          {/* 新增區塊 */}
           <form onSubmit={handleAdd} className="bg-slate-50 p-5 rounded-2xl border mb-6 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
             <div className="md:col-span-4 text-sm font-bold text-slate-600 mb-1">新增資訊資產</div>
             <div><label className="block text-xs text-slate-500 mb-1">編號</label><input required value={newAsset.id} onChange={e=>setNewAsset({...newAsset, id: e.target.value})} placeholder="例: PC-001" className="w-full p-2 border rounded-lg text-sm bg-white" /></div>
@@ -411,7 +409,6 @@
             <button className="bg-emerald-600 hover:bg-emerald-700 text-white p-2 rounded-lg font-bold shadow-md transition-colors w-full h-9">新增資產</button>
           </form>
 
-          {/* 列表清單 */}
           <div className="overflow-x-auto excel-table">
             <table className="w-full text-left text-sm border-collapse min-w-[800px]">
                <thead><tr className="border-b bg-slate-50">
@@ -457,7 +454,7 @@
                            <td className="p-3"><span className={`flex items-center gap-1.5 font-medium text-xs ${warranty.color}`}>{warranty.icon} {warranty.text}</span></td>
                            <td className="p-3 text-center space-x-2">
                              <button onClick={()=>{setEditingAssetId(a.uid); setEditAssetData({...a});}} className="text-slate-400 hover:text-blue-600 transition-colors" title="編輯"><IconEdit/></button>
-                             <button onClick={() => { if(window.confirm('確定刪除此資產？')) setAssets(assets.filter(x=>x.uid!==a.uid)); }} className="text-slate-400 hover:text-red-500 transition-colors" title="刪除"><IconTrash/></button>
+                             <button onClick={() => { if(window.confirm('確定刪除此資產？')) onDeleteAsset(a.uid); }} className="text-slate-400 hover:text-red-500 transition-colors" title="刪除"><IconTrash/></button>
                            </td>
                          </>
                       )}
@@ -538,9 +535,10 @@
       );
     };
 
-    // 7. 系統設定 (加入 Email 設定)
+    // 7. 系統設定
     const ConfigPage = ({ onSave, initLogo, initContact, urgencyConfig, onUpdateUrgencyConfig, emailConfig, onUpdateEmailConfig, showToast }) => {
       const [fbStr, setFbStr] = useState(localStorage.getItem('cfg_firebase') || '');
+      const [geminiKey, setGeminiKey] = useState(localStorage.getItem('cfg_gemini_key') || '');
       const [logoPreview, setLogoPreview] = useState(initLogo || '');
       const [contactInfo, setContactInfo] = useState(initContact || INITIAL_CONTACT_INFO);
       const [localUrgency, setLocalUrgency] = useState(urgencyConfig);
@@ -565,7 +563,6 @@
           onUpdateUrgencyConfig(localUrgency);
           onUpdateEmailConfig(localEmails);
           onSave(cleanedFb, logoPreview, contactInfo);
-          showToast("✅ 所有系統設定已儲存成功！");
         } catch { showToast("❌ 儲存失敗：Firebase Config 格式錯誤。"); }
       };
 
@@ -580,7 +577,6 @@
         if (activeCount === 0) { showToast("⚠️ 請先勾選至少一個 Email 聯絡人"); return; }
         
         setIsTestingEmail(true);
-        // 模擬延遲發信
         setTimeout(() => {
            setIsTestingEmail(false);
            showToast(`✅ 測試成功！已模擬發送測試信至 ${activeCount} 個聯絡人。`);
@@ -591,7 +587,6 @@
         <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 animate-in fade-in space-y-8">
           <div className="flex items-center gap-3 border-b pb-4"><div className="bg-slate-800 p-2 rounded-xl text-white"><IconSettings /></div><h2 className="text-xl font-bold text-slate-800">系統與介面設定</h2></div>
           
-          {/* Email 通知設定 */}
           <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 shadow-inner">
             <div className="flex justify-between items-center mb-4">
               <div>
@@ -663,7 +658,7 @@
       <div className="bg-white p-12 rounded-3xl text-center shadow-sm border"><div className="bg-blue-50 text-blue-600 p-4 rounded-full mb-6 inline-block"><IconPhone /></div><h2 className="text-2xl font-black mb-4">聯絡資訊</h2><p className="whitespace-pre-wrap text-slate-700 leading-relaxed font-medium">{info}</p></div>
     );
 
-    // 8. 帳號管理 (超級管理員視角)
+    // 8. 帳號管理
     const AccountsPage = ({ accounts, onAddAccount, onEditAccount, onDeleteAccount }) => {
       const [newAcc, setNewAcc] = useState({ username: '', password: '', name: '', role: 'admin_level2', expiryDate: '' });
       const [editingId, setEditingId] = useState(null);
@@ -732,48 +727,95 @@
     function App() {
       const [userRole, setUserRole] = useState('guest'); 
       const [userName, setUserName] = useState('');
+      const [currentUserId, setCurrentUserId] = useState('');
       const [activePage, setActivePage] = useState('report');
       const [showLoginModal, setShowLoginModal] = useState(false);
       
       const [toastMsg, setToastMsg] = useState('');
       const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3500); };
 
-      // 連線與同步機制
       const [isOnline, setIsOnline] = useState(navigator.onLine);
-      const [syncQueue, setSyncQueue] = useState(() => JSON.parse(localStorage.getItem('sys_sync_queue') || '[]'));
-      const connectionMode = localStorage.getItem('cfg_firebase') ? '雲端模式' : '本地模式';
-
-      useEffect(() => {
-        const handleOnline = () => { setIsOnline(true); autoSync(); };
-        const handleOffline = () => setIsOnline(false);
-        window.addEventListener('online', handleOnline);
-        window.addEventListener('offline', handleOffline);
-        return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); }
-      }, [syncQueue]);
-
-      useEffect(() => { localStorage.setItem('sys_sync_queue', JSON.stringify(syncQueue)); }, [syncQueue]);
-
-      const autoSync = () => {
-         if (syncQueue.length === 0) return;
-         showToast(`📡 網路已恢復！已自動同步 ${syncQueue.length} 筆單據。`);
-         setRequests(prev => [...syncQueue, ...prev]);
-         setSyncQueue([]);
-      };
-
-      const handleManualSync = () => {
-         if (!isOnline) { showToast("⚠️ 目前沒有網路，無法同步"); return; }
-         autoSync();
-      };
+      const [dbInstance, setDbInstance] = useState(null);
+      const [connectionMode, setConnectionMode] = useState('本地緩存模式');
 
       const [customLogo, setCustomLogo] = useState(localStorage.getItem('sys_logo') || '');
       const [contactInfo, setContactInfo] = useState(localStorage.getItem('sys_contact') || INITIAL_CONTACT_INFO);
       const [urgencyConfig, setUrgencyConfig] = useState(() => JSON.parse(localStorage.getItem('sys_urgency_config')) || DEFAULT_URGENCY_CONFIG);
       const [emailConfig, setEmailConfig] = useState(() => JSON.parse(localStorage.getItem('sys_email_config')) || []);
+      
       const [requests, setRequests] = useState(() => JSON.parse(localStorage.getItem('sys_requests')) || []);
       const [accounts, setAccounts] = useState(() => JSON.parse(localStorage.getItem('sys_accounts')) || INITIAL_ACCOUNTS);
+      const [assets, setAssets] = useState(() => JSON.parse(localStorage.getItem('sys_assets')) || []);
 
-      useEffect(() => { localStorage.setItem('sys_requests', JSON.stringify(requests)); }, [requests]);
-      useEffect(() => { localStorage.setItem('sys_accounts', JSON.stringify(accounts)); }, [accounts]);
+      // 檢查 Session (維持登入1小時)
+      useEffect(() => {
+        const checkSession = () => {
+          const sessionStr = localStorage.getItem('it_session');
+          if (sessionStr) {
+            const session = JSON.parse(sessionStr);
+            if (Date.now() < session.expire) {
+              setUserRole(session.role);
+              setUserName(session.name);
+              setCurrentUserId(session.id);
+            } else {
+              localStorage.removeItem('it_session');
+              showToast('⚠️ 登入已逾時，請重新登入');
+            }
+          }
+        };
+        checkSession();
+
+        const handleOnline = () => setIsOnline(true);
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+
+        // Firebase 初始化與資料同步
+        const fbConfigStr = localStorage.getItem('cfg_firebase');
+        if (fbConfigStr) {
+          try {
+            const config = JSON.parse(fbConfigStr);
+            if (config.apiKey) {
+              const app = initializeApp(config);
+              const auth = getAuth(app);
+              const db = getFirestore(app);
+              
+              signInAnonymously(auth).then(() => {
+                 setDbInstance(db);
+                 setConnectionMode('雲端即時同步');
+
+                 // 監聽 Requests
+                 onSnapshot(collection(db, 'artifacts', 'it-system', 'public', 'data', 'requests'), (snap) => {
+                   const list = [];
+                   snap.forEach(doc => list.push(doc.data()));
+                   setRequests(list.sort((a, b) => new Date(b.date) - new Date(a.date)));
+                 });
+
+                 // 監聽 Accounts
+                 onSnapshot(collection(db, 'artifacts', 'it-system', 'public', 'data', 'accounts'), (snap) => {
+                   const list = [];
+                   snap.forEach(doc => list.push(doc.data()));
+                   if(list.length > 0) setAccounts(list);
+                 });
+
+                 // 監聽 Assets
+                 onSnapshot(collection(db, 'artifacts', 'it-system', 'public', 'data', 'assets'), (snap) => {
+                   const list = [];
+                   snap.forEach(doc => list.push(doc.data()));
+                   if(list.length > 0) setAssets(list);
+                 });
+              });
+            }
+          } catch(e) { console.error("Firebase 初始化失敗", e); }
+        }
+
+        return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); }
+      }, []);
+
+      // 本地儲存備援 (當沒有 DB 時)
+      useEffect(() => { if(!dbInstance) localStorage.setItem('sys_requests', JSON.stringify(requests)); }, [requests, dbInstance]);
+      useEffect(() => { if(!dbInstance) localStorage.setItem('sys_accounts', JSON.stringify(accounts)); }, [accounts, dbInstance]);
+      useEffect(() => { if(!dbInstance) localStorage.setItem('sys_assets', JSON.stringify(assets)); }, [assets, dbInstance]);
 
       const handleUpdateUrgencyConfig = (newConfig) => {
         setUrgencyConfig(newConfig);
@@ -785,62 +827,152 @@
         localStorage.setItem('sys_email_config', JSON.stringify(newEmails));
       };
 
-      // 模擬發送 Email
       const simulateSendEmail = (subject) => {
         const activeEmails = emailConfig.filter(e => e.active);
         if (activeEmails.length > 0) {
-            console.log(`[Email 模擬發送] 標題: ${subject} | 收件人: ${activeEmails.map(e=>e.address).join(', ')}`);
-            setTimeout(() => {
-                showToast(`📧 已同步發送通知信至 ${activeEmails.length} 個聯絡人`);
-            }, 800); // 模擬稍微延遲感
+            setTimeout(() => { showToast(`📧 已同步發送通知信至 ${activeEmails.length} 個聯絡人`); }, 800);
         }
       };
 
       const handleLogin = (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
-        const matched = accounts.find(a => a.username === fd.get('username') && a.password === fd.get('password'));
-        if (matched) { setUserRole(matched.role); setUserName(matched.name); setActivePage('dashboard'); setShowLoginModal(false); showToast(`✅ ${matched.name} 登入成功`); } 
+        const inputUser = fd.get('username');
+        const inputPass = fd.get('password');
+        const matched = accounts.find(a => a.username === inputUser && a.password === inputPass);
+        
+        if (matched) { 
+          setUserRole(matched.role); 
+          setUserName(matched.name); 
+          setCurrentUserId(matched.id);
+          setActivePage('dashboard'); 
+          setShowLoginModal(false); 
+          
+          // 寫入 1 小時 Session 暫存
+          localStorage.setItem('it_session', JSON.stringify({
+            ...matched,
+            expire: Date.now() + 3600000 
+          }));
+
+          showToast(`✅ ${matched.name} 登入成功`); 
+        } 
         else { showToast('❌ 登入失敗：帳號或密碼錯誤！'); }
       };
 
-      const handleSubmitRequest = (formData) => {
+      const handleLogout = () => {
+        setUserRole('guest'); setUserName(''); setCurrentUserId(''); setActivePage('report');
+        localStorage.removeItem('it_session');
+        showToast('👋 已登出系統');
+      };
+
+      // CRUD - Requests
+      const handleSubmitRequest = async (formData) => {
         const reqTitle = formData.title || '無主旨';
-        const req = { ...formData, id: `REQ-${Date.now().toString().slice(-5)}`, status: 'pending', date: new Date().toLocaleString('zh-TW', { hour12: false }) };
+        const finalUnit = formData.unit === '其他' ? formData.otherUnit : formData.unit;
+        const finalJobTitle = formData.jobTitle === '其他' ? formData.otherJobTitle : formData.jobTitle;
+        let finalDeviceName = '';
+        if (formData.isManagedAsset === '是') finalDeviceName = `列管資產: ${formData.assetId}`;
+        else if (formData.isManagedAsset === '其他') finalDeviceName = `非列管/其他: ${formData.otherAsset}`;
+        else finalDeviceName = '非列管設備';
+
+        const req = { 
+          ...formData, 
+          unit: finalUnit,
+          jobTitle: finalJobTitle,
+          deviceName: finalDeviceName,
+          id: `REQ-${Date.now().toString().slice(-5)}`, 
+          status: 'pending', 
+          date: new Date().toLocaleString('zh-TW', { hour12: false }),
+          reply: '', assignee: '', adminUrgency: ''
+        };
         
-        if (isOnline) {
-            setRequests([req, ...requests]);
-            showToast('🚀 通報單已成功送出！');
-            simulateSendEmail(`[新通報] ${reqTitle}`);
+        if (dbInstance && isOnline) {
+            await setDoc(doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'requests', req.id), req);
+            showToast('🚀 通報單已成功送出至雲端！');
         } else {
-            setSyncQueue([req, ...syncQueue]);
-            showToast('⚠️ 無網路連線，單據已儲存於本機，待網路恢復將自動上傳。');
+            setRequests([req, ...requests]);
+            showToast('⚠️ 目前為本地緩存模式，單據儲存於本機。');
         }
+        simulateSendEmail(`[新通報] ${reqTitle}`);
         setActivePage('history');
       };
 
-      const handleUpdateStatus = (id, status, reply, assignee, adminUrgency, title) => {
-        setRequests(requests.map(req => req.id === id ? { ...req, status, reply, assignee, adminUrgency } : req));
-        showToast('💾 狀態已更新儲存');
-        if (reply) {
-            simulateSendEmail(`[回覆通知] 關於您的通報: ${title}`);
+      const handleUpdateStatus = async (id, status, reply, assignee, adminUrgency, title) => {
+        if (dbInstance && isOnline) {
+          const docRef = doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'requests', id);
+          await updateDoc(docRef, { status, reply, assignee, adminUrgency });
+        } else {
+          setRequests(requests.map(req => req.id === id ? { ...req, status, reply, assignee, adminUrgency } : req));
         }
+        showToast('💾 狀態已更新儲存');
+        if (reply) simulateSendEmail(`[回覆通知] 關於您的通報: ${title}`);
       };
 
-      const handleAddAccount = (accData) => {
+      const handleDeleteRequest = async (id) => {
+        if (dbInstance && isOnline) {
+          await deleteDoc(doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'requests', id));
+        } else {
+          setRequests(requests.filter(r => r.id !== id));
+        }
+        showToast('🗑️ 單據已刪除');
+      };
+
+      // CRUD - Accounts
+      const handleAddAccount = async (accData) => {
         const newAcc = { ...accData, id: `ACC-${Date.now()}` };
-        setAccounts([...accounts, newAcc]);
+        if (dbInstance && isOnline) {
+          await setDoc(doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'accounts', newAcc.id), newAcc);
+        } else {
+          setAccounts([...accounts, newAcc]);
+        }
         showToast('👥 新帳號已建立');
       };
 
-      const handleEditAccount = (id, updatedData) => {
-        setAccounts(accounts.map(a => a.id === id ? { ...updatedData, id } : a));
+      const handleEditAccount = async (id, updatedData) => {
+        const newAcc = { ...updatedData, id };
+        if (dbInstance && isOnline) {
+          await updateDoc(doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'accounts', id), newAcc);
+        } else {
+          setAccounts(accounts.map(a => a.id === id ? newAcc : a));
+        }
         showToast('✅ 帳號資料已更新');
       };
 
-      const handleDeleteAccount = (id) => {
-        setAccounts(accounts.filter(a => a.id !== id));
+      const handleDeleteAccount = async (id) => {
+        if (dbInstance && isOnline) {
+          await deleteDoc(doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'accounts', id));
+        } else {
+          setAccounts(accounts.filter(a => a.id !== id));
+        }
         showToast('🗑️ 帳號已刪除');
+      };
+
+      // CRUD - Assets
+      const handleAddAsset = async (assetData) => {
+        if (dbInstance && isOnline) {
+          await setDoc(doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'assets', assetData.uid), assetData);
+        } else {
+          setAssets([...assets, assetData]);
+        }
+        showToast("✅ 資產新增成功");
+      };
+
+      const handleEditAsset = async (uid, updatedData) => {
+        if (dbInstance && isOnline) {
+          await updateDoc(doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'assets', uid), updatedData);
+        } else {
+          setAssets(assets.map(a => a.uid === uid ? updatedData : a));
+        }
+        showToast("✅ 資產更新成功");
+      };
+
+      const handleDeleteAsset = async (uid) => {
+        if (dbInstance && isOnline) {
+          await deleteDoc(doc(dbInstance, 'artifacts', 'it-system', 'public', 'data', 'assets', uid));
+        } else {
+          setAssets(assets.filter(a => a.uid !== uid));
+        }
+        showToast("🗑️ 資產已刪除");
       };
 
       const NavTab = ({ id, icon, label, isActive }) => (
@@ -861,17 +993,12 @@
                       <p className={`text-[10px] px-2 py-0.5 rounded font-bold flex items-center gap-1 ${isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
                          {isOnline ? <IconCloud/> : <IconCloudOff/>} {isOnline ? '已連線' : '離線中'}
                       </p>
-                      {syncQueue.length > 0 && (
-                        <button onClick={handleManualSync} className="text-[10px] bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded font-bold hover:bg-yellow-500 shadow-sm transition-all">
-                           一鍵同步 ({syncQueue.length})
-                        </button>
-                      )}
                     </div>
                   </div>
                 </div>
                 <div>
                   {userRole !== 'guest' ? (
-                    <div className="flex items-center gap-4"><span className="text-sm font-bold text-slate-600"><IconUsers className="inline w-4 h-4 mr-1"/>{userName}</span><button onClick={()=>{setUserRole('guest'); showToast('👋 已登出系統');}} className="text-sm font-bold text-red-500 hover:text-red-700 bg-red-50 px-3 py-1.5 rounded-lg transition-colors">登出</button></div>
+                    <div className="flex items-center gap-4"><span className="text-sm font-bold text-slate-600"><IconUsers className="inline w-4 h-4 mr-1"/>{userName}</span><button onClick={handleLogout} className="text-sm font-bold text-red-500 hover:text-red-700 bg-red-50 px-3 py-1.5 rounded-lg transition-colors">登出</button></div>
                   ) : (
                     <button onClick={() => setShowLoginModal(true)} className="text-sm font-bold text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 px-4 py-2 rounded-lg transition-colors shadow-sm">登入後台</button>
                   )}
@@ -906,12 +1033,12 @@
             {activePage === 'report' && <ReportPage onSubmitForm={handleSubmitRequest} urgencyConfig={urgencyConfig} isOnline={isOnline} showToast={showToast} />}
             {activePage === 'history' && <HistoryPage requests={requests} urgencyConfig={urgencyConfig} />}
             {activePage === 'contact' && <ContactPage info={contactInfo} />}
-            {activePage === 'dashboard' && userRole !== 'guest' && <AdminDashboard requests={requests} onUpdateStatus={handleUpdateStatus} onDeleteRequest={(id) => {setRequests(requests.filter(r => r.id !== id)); showToast('🗑️ 單據已刪除');}} urgencyConfig={urgencyConfig} />}
-            {activePage === 'assets' && userRole !== 'guest' && <AssetsPage showToast={showToast} />}
+            {activePage === 'dashboard' && userRole !== 'guest' && <AdminDashboard requests={requests} onUpdateStatus={handleUpdateStatus} onDeleteRequest={handleDeleteRequest} urgencyConfig={urgencyConfig} />}
+            {activePage === 'assets' && userRole !== 'guest' && <AssetsPage assets={assets} onAddAsset={handleAddAsset} onEditAsset={handleEditAsset} onDeleteAsset={handleDeleteAsset} showToast={showToast} />}
             {activePage === 'topology' && userRole !== 'guest' && <TopologyPage isSuperAdmin={userRole === 'super_admin'} showToast={showToast} />}
             {activePage === 'software' && userRole !== 'guest' && <SoftwarePage isSuperAdmin={userRole === 'super_admin'} showToast={showToast} />}
             {activePage === 'accounts' && userRole === 'super_admin' && <AccountsPage accounts={accounts} onAddAccount={handleAddAccount} onEditAccount={handleEditAccount} onDeleteAccount={handleDeleteAccount} />}
-            {activePage === 'config' && userRole === 'super_admin' && <ConfigPage onSave={(fb, l, c) => {localStorage.setItem('cfg_firebase', fb); localStorage.setItem('sys_logo', l); localStorage.setItem('sys_contact', c); setCustomLogo(l); setContactInfo(c);}} initLogo={customLogo} initContact={contactInfo} urgencyConfig={urgencyConfig} onUpdateUrgencyConfig={handleUpdateUrgencyConfig} emailConfig={emailConfig} onUpdateEmailConfig={handleUpdateEmailConfig} showToast={showToast} />}
+            {activePage === 'config' && userRole === 'super_admin' && <ConfigPage onSave={(fb, l, c) => {localStorage.setItem('cfg_firebase', fb); localStorage.setItem('sys_logo', l); localStorage.setItem('sys_contact', c); setCustomLogo(l); setContactInfo(c); window.location.reload();}} initLogo={customLogo} initContact={contactInfo} urgencyConfig={urgencyConfig} onUpdateUrgencyConfig={handleUpdateUrgencyConfig} emailConfig={emailConfig} onUpdateEmailConfig={handleUpdateEmailConfig} showToast={showToast} />}
           </main>
 
           {showLoginModal && (
@@ -929,7 +1056,6 @@
             </div>
           )}
 
-          {/* 全域 Toast 提示 */}
           {toastMsg && (
             <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in slide-in-from-bottom-8 fade-in z-[999] font-bold text-sm">
               {toastMsg}
