@@ -9,19 +9,23 @@
   <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
   <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
   <style>
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap');
     body { font-family: 'Noto Sans TC', sans-serif; }
     .scrollbar-hide::-webkit-scrollbar { display: none; }
     .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+    .excel-table table { width: 100%; border-collapse: collapse; text-align: left; font-size: 0.875rem; }
+    .excel-table th, .excel-table td { border: 1px solid #e2e8f0; padding: 8px 12px; }
+    .excel-table th { background-color: #f8fafc; font-weight: bold; }
   </style>
 </head>
 <body class="bg-slate-50">
   <div id="root"></div>
 
   <script type="text/babel">
-    const { useState, useEffect, useMemo } = React;
+    const { useState, useEffect, useMemo, useCallback } = React;
 
     // ==========================================
     // 常數與初始資料定義
@@ -34,32 +38,29 @@
       '國泰日照中心', '國泰綜合長照機構', '嘉義市德興居家服務', '嘉義縣德興居家服務', 
       '嘉義縣德昇居家服務', '嘉義市育仁長照園區', '其他'
     ];
-    // 用於過濾 "其他" 單位
     const STANDARD_UNITS = UNITS.filter(u => u !== '其他');
 
-    const JOB_TITLES = [
-      '醫師', '藥師', '檢驗師', '放射師', '護理人員', '行政人員', '營養師', 
-      '物理治療師', '職能治療師', '語言治療師', '復健治療生', '其他'
+    const JOB_TITLES = ['醫師', '藥師', '檢驗師', '放射師', '護理人員', '行政人員', '營養師', '物理治療師', '職能治療師', '語言治療師', '復健治療生', '其他'];
+
+    const DEFAULT_URGENCY_CONFIG = [
+      { id: 'u1', name: '低', weight: 1, color: 'bg-green-100 text-green-700' },
+      { id: 'u2', name: '中', weight: 2, color: 'bg-yellow-100 text-yellow-700' },
+      { id: 'u3', name: '高', weight: 3, color: 'bg-orange-100 text-orange-700' },
+      { id: 'u4', name: '緊急', weight: 4, color: 'bg-red-100 text-red-700' }
     ];
 
-    const URGENCY_LEVELS = ['低', '中', '高', '緊急'];
-    const URGENCY_WEIGHT = { '低': 1, '中': 2, '高': 3, '緊急': 4, '': 0 };
-
-    const INITIAL_ACCOUNTS = [
-      { id: 'acc-admin', username: 'admin', password: 'admin123', name: '超級管理員', role: 'super_admin', expiryDate: '' }
-    ];
-
+    const INITIAL_ACCOUNTS = [{ id: 'acc-admin', username: 'admin', password: 'admin123', name: '超級管理員', role: 'super_admin', expiryDate: '' }];
     const INITIAL_CONTACT_INFO = "若遇到系統緊急狀況，請撥打資訊室專線：\n分機：1234 或 5678\n負責人：王資訊長\n服務時間：週一至週五 08:00 - 17:00";
 
     // ==========================================
-    // 內嵌純 SVG 圖示元件
+    // SVG 圖示
     // ==========================================
     const IconAlert = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
     const IconList = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>;
     const IconDashboard = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>;
     const IconSettings = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>;
     const IconClose = () => <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>;
-    const IconTrash = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2-2v2"/></svg>;
+    const IconTrash = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>;
     const IconEdit = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>;
     const IconMessage = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>;
     const IconUsers = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>;
@@ -67,6 +68,14 @@
     const IconPhone = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z"/></svg>;
     const IconSearch = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>;
     const IconFilter = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>;
+    const IconNetwork = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/></svg>;
+    const IconCode = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>;
+    const IconDatabase = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>;
+    const IconCloud = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/></svg>;
+    const IconCloudOff = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22.61 16.95A4.5 4.5 0 0 0 17.5 10h-1.79A7.73 7.73 0 0 0 15 7.23"/><path d="m2 2 20 20"/><path d="M5.78 5.78A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 2.59-.81"/></svg>;
+    const IconWarning = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>;
+    const IconCheckSquare = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="m9 12 2 2 4-4"/></svg>;
+    const IconMail = () => <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>;
 
     // ==========================================
     // 共用小元件
@@ -77,11 +86,36 @@
       return <span className="bg-amber-100 text-amber-700 px-3 py-1 rounded-full text-xs font-bold whitespace-nowrap">待處理</span>;
     };
 
-    const UrgencyBadge = ({ level }) => {
-      if (level === '緊急') return <span className="bg-red-100 text-red-700 px-2 py-0.5 rounded text-[10px] font-black">🚨 緊急</span>;
-      if (level === '高') return <span className="bg-orange-100 text-orange-700 px-2 py-0.5 rounded text-[10px] font-bold">高</span>;
-      if (level === '中') return <span className="bg-yellow-100 text-yellow-700 px-2 py-0.5 rounded text-[10px] font-bold">中</span>;
-      return <span className="bg-green-100 text-green-700 px-2 py-0.5 rounded text-[10px] font-bold">低</span>;
+    const UrgencyBadge = ({ level, config }) => {
+      if (!config) return null;
+      const match = config.find(c => c.name === level);
+      const colorClass = match ? match.color : 'bg-slate-100 text-slate-700';
+      return <span className={`${colorClass} px-2 py-0.5 rounded text-[10px] font-bold whitespace-nowrap`}>{level || '未設定'}</span>;
+    };
+
+    // 保固狀態計算函式
+    const calculateWarranty = (purchaseDate, usefulLife) => {
+      if (!purchaseDate || !usefulLife) return { valid: false, text: '資料不全', color: 'text-slate-400', icon: null };
+      const start = new Date(purchaseDate);
+      const end = new Date(start.setFullYear(start.getFullYear() + Number(usefulLife)));
+      const now = new Date();
+      const diffYears = (end - now) / (1000 * 60 * 60 * 24 * 365.25);
+
+      if (diffYears < 0) {
+        return {
+          valid: false,
+          text: `已逾使用期限 / 保固年限 (過期約 ${Math.abs(diffYears).toFixed(1)} 年)`,
+          color: 'text-red-500',
+          icon: <IconWarning />
+        };
+      } else {
+        return {
+          valid: true,
+          text: `保固內 / 仍在年限內 (剩餘約 ${diffYears.toFixed(1)} 年)`,
+          color: 'text-emerald-500',
+          icon: <IconCheckSquare />
+        };
+      }
     };
 
     // ==========================================
@@ -89,114 +123,75 @@
     // ==========================================
 
     // 1. 填寫通報頁面
-    const ReportPage = ({ onSubmitForm }) => {
+    const ReportPage = ({ onSubmitForm, urgencyConfig, isOnline, showToast }) => {
       const [formData, setFormData] = useState({
-        unit: UNITS[0],
-        otherUnit: '',
-        jobTitle: JOB_TITLES[0],
-        otherJobTitle: '',
-        reporterName: '',
-        phone: '',
-        ext: '',
-        mobile: '',
-        location: '',
-        category: CATEGORIES[0],
-        isManagedAsset: '否',
-        assetId: '',
-        otherAsset: '',
-        userUrgency: '中',
-        title: '',
-        description: '',
-        photos: []
+        unit: UNITS[0], otherUnit: '', jobTitle: JOB_TITLES[0], otherJobTitle: '', reporterName: '',
+        phone: '', ext: '', mobile: '', location: '', category: CATEGORIES[0], isManagedAsset: '否',
+        assetId: '', otherAsset: '', userUrgency: urgencyConfig[1]?.name || '中', title: '', description: '', photos: []
       });
 
       const handleImageUpload = (e) => {
         const files = Array.from(e.target.files);
         if (!files.length) return;
-
         files.forEach(file => {
-          if (file.size > 10 * 1024 * 1024) { 
-            alert(`檔案 ${file.name} 超過 10MB 限制！`);
-            return;
-          }
+          if (file.size > 5 * 1024 * 1024) { showToast(`檔案 ${file.name} 超過 5MB 限制！`); return; }
           const reader = new FileReader();
-          reader.onloadend = () => {
-            setFormData(prev => ({ ...prev, photos: [...prev.photos, reader.result] }));
-          };
+          reader.onloadend = () => setFormData(prev => ({ ...prev, photos: [...prev.photos, reader.result] }));
           reader.readAsDataURL(file);
         });
       };
 
-      const removePhoto = (indexToRemove) => {
-        setFormData(prev => ({ ...prev, photos: prev.photos.filter((_, idx) => idx !== indexToRemove) }));
-      };
+      const removePhoto = (idxToRemove) => setFormData(prev => ({ ...prev, photos: prev.photos.filter((_, idx) => idx !== idxToRemove) }));
 
       const handleSubmit = (e) => {
         e.preventDefault();
         onSubmitForm(formData);
-        setFormData({ 
-          unit: UNITS[0], otherUnit: '', jobTitle: JOB_TITLES[0], otherJobTitle: '', 
-          reporterName: '', phone: '', ext: '', mobile: '', location: '', 
-          category: CATEGORIES[0], isManagedAsset: '否', assetId: '', otherAsset: '', 
-          userUrgency: '中', title: '', description: '', photos: [] 
-        });
+        setFormData({ ...formData, title: '', description: '', photos: [] });
       };
 
       return (
-        <form onSubmit={handleSubmit} className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6 animate-in fade-in slide-in-from-bottom-4">
-          <div className="flex items-center gap-3 border-b pb-4">
+        <form onSubmit={handleSubmit} className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6 animate-in fade-in slide-in-from-bottom-4 relative overflow-hidden">
+          {!isOnline && (
+            <div className="absolute top-0 left-0 right-0 bg-yellow-500 text-white text-center py-1 text-xs font-bold z-10">
+              ⚠️ 目前處於離線狀態，通報單將暫存於本機，待網路恢復後自動或手動上傳。
+            </div>
+          )}
+          <div className="flex items-center gap-3 border-b pb-4 mt-2">
             <div className="bg-blue-100 p-2 rounded-xl text-blue-600"><IconAlert /></div>
             <h2 className="text-xl font-bold text-slate-800">新增資訊障礙通報</h2>
           </div>
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div className="md:col-span-1">
+            <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">機構 / 單位 (必填)</label>
               <select value={formData.unit} onChange={e => setFormData({...formData, unit: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
                 {UNITS.map(u => <option key={u} value={u}>{u}</option>)}
               </select>
-              {formData.unit === '其他' && (
-                 <input required value={formData.otherUnit} onChange={e => setFormData({...formData, otherUnit: e.target.value})} className="w-full p-3 mt-3 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="請填寫機構/單位名稱" />
-              )}
+              {formData.unit === '其他' && <input required value={formData.otherUnit} onChange={e => setFormData({...formData, otherUnit: e.target.value})} className="w-full p-3 mt-3 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="請填寫機構/單位名稱" />}
             </div>
-            <div className="md:col-span-1">
+            <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">職務名稱 (必填)</label>
               <select value={formData.jobTitle} onChange={e => setFormData({...formData, jobTitle: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
                 {JOB_TITLES.map(j => <option key={j} value={j}>{j}</option>)}
               </select>
-              {formData.jobTitle === '其他' && (
-                 <input required value={formData.otherJobTitle} onChange={e => setFormData({...formData, otherJobTitle: e.target.value})} className="w-full p-3 mt-3 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="請填寫職務名稱" />
-              )}
+              {formData.jobTitle === '其他' && <input required value={formData.otherJobTitle} onChange={e => setFormData({...formData, otherJobTitle: e.target.value})} className="w-full p-3 mt-3 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="請填寫職務名稱" />}
             </div>
-            <div className="md:col-span-1">
+            <div>
               <label className="block text-sm font-semibold text-slate-700 mb-2">通報人姓名 (必填)</label>
               <input required value={formData.reporterName} onChange={e => setFormData({...formData, reporterName: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="例如：王大明" />
             </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">電話</label>
-              <input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="市話號碼" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">聯絡分機</label>
-              <input value={formData.ext} onChange={e => setFormData({...formData, ext: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="分機號碼" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">手機</label>
-              <input value={formData.mobile} onChange={e => setFormData({...formData, mobile: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="手機號碼" />
-            </div>
+            <div><label className="block text-sm font-semibold text-slate-700 mb-2">電話</label><input value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl" /></div>
+            <div><label className="block text-sm font-semibold text-slate-700 mb-2">聯絡分機</label><input value={formData.ext} onChange={e => setFormData({...formData, ext: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl" /></div>
+            <div><label className="block text-sm font-semibold text-slate-700 mb-2">手機</label><input value={formData.mobile} onChange={e => setFormData({...formData, mobile: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl" /></div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">發生地點 / 樓層詳細位置</label>
-              <input value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="例如：3F 第3診間" />
-            </div>
-            <div>
-              <label className="block text-sm font-semibold text-slate-700 mb-2">障礙分類</label>
-              <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500">
+            <div><label className="block text-sm font-semibold text-slate-700 mb-2">發生地點</label><input value={formData.location} onChange={e => setFormData({...formData, location: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl" /></div>
+            <div><label className="block text-sm font-semibold text-slate-700 mb-2">障礙分類</label>
+              <select value={formData.category} onChange={e => setFormData({...formData, category: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl">
                 {CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             </div>
@@ -206,464 +201,469 @@
             <label className="block text-sm font-semibold text-slate-700 mb-3">此報修是否屬於列管設備？</label>
             <div className="flex gap-4 mb-4">
               {['是', '否', '其他'].map(opt => (
-                <label key={opt} className="flex items-center gap-2 cursor-pointer">
-                  <input type="radio" name="isManagedAsset" value={opt} checked={formData.isManagedAsset === opt} onChange={e => setFormData({...formData, isManagedAsset: e.target.value})} className="w-4 h-4 text-blue-600 focus:ring-blue-500" />
-                  <span className="text-sm font-medium text-slate-700">{opt}</span>
-                </label>
+                <label key={opt} className="flex items-center gap-2 cursor-pointer"><input type="radio" name="isManagedAsset" value={opt} checked={formData.isManagedAsset === opt} onChange={e => setFormData({...formData, isManagedAsset: e.target.value})} className="w-4 h-4 text-blue-600 focus:ring-blue-500" /><span className="text-sm font-medium text-slate-700">{opt}</span></label>
               ))}
             </div>
-
-            {formData.isManagedAsset === '是' && (
-              <input required value={formData.assetId} onChange={e => setFormData({...formData, assetId: e.target.value})} className="w-full p-3 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="請輸入資訊資產編號 (例: INF-001)" />
-            )}
-            {formData.isManagedAsset === '其他' && (
-              <input required value={formData.otherAsset} onChange={e => setFormData({...formData, otherAsset: e.target.value})} className="w-full p-3 bg-white border border-blue-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500" placeholder="請簡單說明設備特徵" />
-            )}
+            {formData.isManagedAsset === '是' && <input required value={formData.assetId} onChange={e => setFormData({...formData, assetId: e.target.value})} className="w-full p-3 bg-white border border-blue-200 rounded-xl" placeholder="請輸入資訊資產編號 (例: INF-001)" />}
+            {formData.isManagedAsset === '其他' && <input required value={formData.otherAsset} onChange={e => setFormData({...formData, otherAsset: e.target.value})} className="w-full p-3 bg-white border border-blue-200 rounded-xl" placeholder="請簡單說明設備特徵" />}
           </div>
 
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-2">您認為的緊急程度</label>
-            <div className="flex gap-4">
-              {URGENCY_LEVELS.map(level => (
-                <label key={level} className={`flex-1 py-3 border rounded-xl text-center cursor-pointer transition-colors font-bold text-sm ${formData.userUrgency === level ? 'bg-blue-100 border-blue-500 text-blue-800 shadow-inner' : 'bg-white hover:bg-slate-50 text-slate-600'}`}>
-                  <input type="radio" name="userUrgency" value={level} checked={formData.userUrgency === level} onChange={e => setFormData({...formData, userUrgency: e.target.value})} className="hidden" />
-                  {level}
+            <div className="flex gap-4 flex-wrap">
+              {urgencyConfig.map(u => (
+                <label key={u.id} className={`flex-1 min-w-[100px] py-3 border rounded-xl text-center cursor-pointer transition-colors font-bold text-sm ${formData.userUrgency === u.name ? 'ring-2 ring-blue-500 bg-blue-50 text-blue-800' : 'bg-white hover:bg-slate-50 text-slate-600'}`}>
+                  <input type="radio" name="userUrgency" value={u.name} checked={formData.userUrgency === u.name} onChange={e => setFormData({...formData, userUrgency: e.target.value})} className="hidden" />
+                  {u.name}
                 </label>
               ))}
             </div>
           </div>
 
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">障礙主旨 (必填)</label>
-            <input required value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 font-bold" placeholder="簡單描述遇到的問題 (如: 印表機卡紙、電腦無法開機)" />
-          </div>
+          <div><label className="block text-sm font-semibold text-slate-700 mb-2">障礙主旨 (必填)</label><input required value={formData.title} onChange={e => setFormData({...formData, title: e.target.value})} className="w-full p-3 bg-slate-50 border rounded-xl font-bold" /></div>
+          <div><label className="block text-sm font-semibold text-slate-700 mb-2">詳細狀況描述 (必填)</label><textarea required rows="4" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-xl resize-none"></textarea></div>
 
           <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">詳細狀況描述 (必填)</label>
-            <textarea required rows="4" value={formData.description} onChange={e => setFormData({...formData, description: e.target.value})} className="w-full p-4 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500 resize-none" placeholder="請詳細說明故障發生時的狀況或錯誤代碼..."></textarea>
-          </div>
-
-          <div>
-            <label className="block text-sm font-semibold text-slate-700 mb-2">上傳現場照片/螢幕截圖 (可多選，單張限 10MB)</label>
-            <label className="flex items-center justify-center w-full p-4 border-2 border-dashed border-slate-300 rounded-xl hover:bg-slate-50 hover:border-blue-400 cursor-pointer transition-colors text-slate-500 gap-2">
-              <IconCamera /> 點擊選擇圖片
-              <input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} />
-            </label>
-            
+            <label className="block text-sm font-semibold text-slate-700 mb-2">上傳現場照片/螢幕截圖</label>
+            <label className="flex items-center justify-center w-full p-4 border-2 border-dashed border-slate-300 rounded-xl hover:bg-slate-50 cursor-pointer text-slate-500 gap-2"><IconCamera /> 點擊選擇圖片<input type="file" accept="image/*" multiple className="hidden" onChange={handleImageUpload} /></label>
             {formData.photos.length > 0 && (
               <div className="mt-4 flex flex-wrap gap-4">
                 {formData.photos.map((photoStr, idx) => (
-                  <div key={idx} className="relative inline-block">
-                    <img src={photoStr} alt="預覽" className="h-24 w-24 object-cover rounded-lg shadow-sm border" />
-                    <button type="button" onClick={() => removePhoto(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 shadow hover:bg-red-600 scale-75"><IconClose /></button>
-                  </div>
+                  <div key={idx} className="relative inline-block"><img src={photoStr} className="h-24 w-24 object-cover rounded-lg shadow-sm border" /><button type="button" onClick={() => removePhoto(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1"><IconClose /></button></div>
                 ))}
               </div>
             )}
           </div>
-
-          <button type="submit" className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-md hover:bg-blue-700 active:scale-[0.99] transition-all">送出通報單</button>
+          <button type="submit" className="w-full bg-blue-600 text-white font-bold py-4 rounded-xl shadow-md hover:bg-blue-700">{isOnline ? '送出通報單' : '離線暫存通報單'}</button>
         </form>
       );
     };
 
     // 2. 通報進度查詢 (一般視角)
-    const HistoryPage = ({ requests }) => {
+    const HistoryPage = ({ requests, urgencyConfig }) => {
       const [zoomedImg, setZoomedImg] = useState(null);
-      
-      // 單位多選 Checkbox
       const [selectedUnits, setSelectedUnits] = useState([]);
       const [sortOption, setSortOption] = useState('time_desc');
 
-      const handleToggleUnit = (unit) => {
-        setSelectedUnits(prev => prev.includes(unit) ? prev.filter(u => u !== unit) : [...prev, unit]);
-      };
+      const handleToggleUnit = (unit) => setSelectedUnits(prev => prev.includes(unit) ? prev.filter(u => u !== unit) : [...prev, unit]);
+      const handleSelectAll = () => setSelectedUnits(selectedUnits.length === UNITS.length ? [] : UNITS);
 
-      const handleSelectAll = () => {
-        if (selectedUnits.length === UNITS.length) setSelectedUnits([]); // 全不選
-        else setSelectedUnits(UNITS); // 全選
-      };
-
-      // 過濾與排序
       const processedRequests = useMemo(() => {
-        // 1. 過濾 (如果有勾選才顯示)
-        let filtered = requests;
-        if (selectedUnits.length === 0) {
-          filtered = []; // 沒勾選就不顯示
-        } else {
-          filtered = requests.filter(req => {
-            const isStandard = STANDARD_UNITS.includes(req.unit);
-            // 如果單據單位在標準清單內，且該單位被勾選
-            if (isStandard && selectedUnits.includes(req.unit)) return true;
-            // 如果單據單位不在標準清單內(為自填其他)，且"其他"被勾選
-            if (!isStandard && selectedUnits.includes('其他')) return true;
-            return false;
-          });
-        }
-
-        // 2. 排序
+        let filtered = selectedUnits.length === 0 ? [] : requests.filter(req => {
+            const isStd = STANDARD_UNITS.includes(req.unit);
+            return (isStd && selectedUnits.includes(req.unit)) || (!isStd && selectedUnits.includes('其他'));
+        });
         return filtered.sort((a, b) => {
           switch(sortOption) {
             case 'time_desc': return new Date(b.date).getTime() - new Date(a.date).getTime();
             case 'time_asc': return new Date(a.date).getTime() - new Date(b.date).getTime();
-            case 'urgency': return (URGENCY_WEIGHT[b.userUrgency] || 0) - (URGENCY_WEIGHT[a.userUrgency] || 0);
+            case 'urgency': return (urgencyConfig.find(c => c.name === b.userUrgency)?.weight || 0) - (urgencyConfig.find(c => c.name === a.userUrgency)?.weight || 0);
             case 'unit': return (a.unit || '').localeCompare(b.unit || '');
-            case 'location': return (a.location || '').localeCompare(b.location || '');
             default: return 0;
           }
         });
-      }, [requests, selectedUnits, sortOption]);
+      }, [requests, selectedUnits, sortOption, urgencyConfig]);
 
       return (
         <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4">
-          
           <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-6">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-4 border-b pb-4">
               <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2"><IconSearch /> 單位選擇與進度查詢</h2>
-              <div className="flex items-center gap-2">
-                <IconFilter />
-                <span className="text-sm font-bold text-slate-600">排序方式：</span>
-                <select value={sortOption} onChange={e => setSortOption(e.target.value)} className="p-2 border rounded-lg text-sm outline-none bg-slate-50 focus:ring-2 focus:ring-blue-500">
-                  <option value="time_desc">最新建檔優先</option>
-                  <option value="time_asc">最舊建檔優先</option>
-                  <option value="urgency">緊急程度 (高至低)</option>
-                  <option value="unit">單位名稱</option>
-                  <option value="location">樓層與地點</option>
-                </select>
-              </div>
+              <div className="flex items-center gap-2"><IconFilter /><span className="text-sm font-bold text-slate-600">排序：</span><select value={sortOption} onChange={e => setSortOption(e.target.value)} className="p-2 border rounded-lg text-sm bg-slate-50"><option value="time_desc">最新建檔</option><option value="time_asc">最舊建檔</option><option value="urgency">緊急程度</option><option value="unit">單位名稱</option></select></div>
             </div>
-
             <div className="space-y-3">
-              <label className="flex items-center gap-2 cursor-pointer w-max mb-2">
-                <input type="checkbox" checked={selectedUnits.length === UNITS.length} onChange={handleSelectAll} className="w-4 h-4 text-blue-600 rounded" />
-                <span className="text-sm font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded">📌 全選 / 全不選</span>
-              </label>
-              
+              <label className="flex items-center gap-2 cursor-pointer w-max mb-2"><input type="checkbox" checked={selectedUnits.length === UNITS.length} onChange={handleSelectAll} className="w-4 h-4 text-blue-600 rounded" /><span className="text-sm font-bold text-blue-700 bg-blue-50 px-2 py-1 rounded">📌 全選 / 全不選</span></label>
               <div className="flex flex-wrap gap-2">
                 {UNITS.map(u => (
-                  <label key={u} className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg cursor-pointer text-sm transition-colors ${selectedUnits.includes(u) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-slate-600 hover:bg-slate-50'}`}>
-                    <input type="checkbox" checked={selectedUnits.includes(u)} onChange={() => handleToggleUnit(u)} className="hidden" />
-                    {u}
-                  </label>
+                  <label key={u} className={`flex items-center gap-2 px-3 py-1.5 border rounded-lg cursor-pointer text-sm ${selectedUnits.includes(u) ? 'bg-blue-600 text-white' : 'bg-white text-slate-600'}`}><input type="checkbox" checked={selectedUnits.includes(u)} onChange={() => handleToggleUnit(u)} className="hidden" />{u}</label>
                 ))}
               </div>
             </div>
           </div>
-
-          {selectedUnits.length === 0 ? (
-            <div className="bg-white/50 rounded-3xl p-16 text-center text-slate-400">
-              <div className="flex justify-center mb-4 opacity-50"><IconList /></div>
-              <p className="font-bold">請於上方勾選單位，即可查看通報單</p>
-            </div>
-          ) : processedRequests.length === 0 ? (
-            <div className="bg-white rounded-3xl p-16 text-center text-slate-400 border border-slate-100 shadow-sm">
-              <div className="flex justify-center mb-4"><IconList /></div>
-              <p className="font-bold">所選單位目前無任何通報紀錄</p>
-            </div>
-          ) : (
+          {selectedUnits.length === 0 ? <div className="bg-white/50 rounded-3xl p-16 text-center text-slate-400 font-bold"><IconList className="mx-auto mb-2 opacity-50"/>請於上方勾選單位</div> : processedRequests.length === 0 ? <div className="bg-white rounded-3xl p-16 text-center text-slate-400 border shadow-sm font-bold"><IconList className="mx-auto mb-2"/>目前無任何紀錄</div> : (
             <div className="space-y-4">
-              <div className="text-sm text-slate-500 font-bold mb-2">共找到 {processedRequests.length} 筆紀錄</div>
+              <div className="text-sm text-slate-500 font-bold px-2">共找到 {processedRequests.length} 筆紀錄</div>
               {processedRequests.map(req => (
-                <div key={req.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100 transition-all hover:shadow-md">
-                  <div className="flex flex-col md:flex-row md:justify-between md:items-start gap-4 mb-4">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <StatusBadge status={req.status} />
-                        <UrgencyBadge level={req.userUrgency} />
-                      </div>
-                      <h3 className="text-lg font-bold text-slate-800 mt-2">{req.title}</h3>
-                      <p className="text-xs text-slate-400 mt-1">單號: {req.id} • {req.date}</p>
-                    </div>
-                  </div>
-                  
-                  <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-slate-600 mb-4 bg-slate-50 p-3 rounded-xl border border-slate-100">
-                    <span><strong className="text-slate-500 font-medium">單位：</strong>{req.unit}</span>
-                    <span><strong className="text-slate-500 font-medium">通報人：</strong>{req.reporterName} ({req.jobTitle})</span>
-                    {req.location && <span><strong className="text-slate-500 font-medium">地點：</strong>{req.location}</span>}
-                    <span><strong className="text-slate-500 font-medium">設備：</strong>{req.deviceName}</span>
-                  </div>
-                  
-                  <p className="text-sm text-slate-700 bg-slate-50 p-4 rounded-xl border border-slate-100 whitespace-pre-wrap">{req.description}</p>
-                  
+                <div key={req.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
+                  <div className="flex gap-2 mb-2"><StatusBadge status={req.status} /><UrgencyBadge level={req.userUrgency} config={urgencyConfig}/></div>
+                  <h3 className="text-lg font-bold">{req.title}</h3>
+                  <p className="text-xs text-slate-400 mt-1">{req.id} • {req.date}</p>
+                  <div className="text-sm text-slate-600 mt-4 bg-slate-50 p-3 rounded-xl border">單位：{req.unit} | 通報人：{req.reporterName} | 地點：{req.location} | 設備：{req.deviceName}</div>
+                  <p className="text-sm text-slate-700 mt-3 bg-slate-50 p-4 rounded-xl border whitespace-pre-wrap">{req.description}</p>
                   {req.photos && req.photos.length > 0 && (
-                    <div className="mt-4">
-                      <span className="block text-xs font-bold text-slate-500 mb-2">附加圖片 (點擊可放大)：</span>
-                      <div className="flex flex-wrap gap-2">
-                        {req.photos.map((p, idx) => (
-                          <img key={idx} src={p} alt="附件" onClick={() => setZoomedImg(p)} className="h-20 w-20 object-cover rounded-lg border shadow-sm hover:opacity-80 cursor-zoom-in transition-opacity" />
-                        ))}
-                      </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      {req.photos.map((p, i) => <img key={i} src={p} onClick={() => setZoomedImg(p)} className="h-20 w-20 object-cover rounded-lg border cursor-zoom-in" />)}
                     </div>
                   )}
-
-                  {req.reply && (
-                    <div className="mt-4 bg-blue-50 p-4 rounded-xl border-l-4 border-blue-400">
-                      <span className="font-bold text-blue-800 flex items-center gap-2 mb-1 text-sm"><IconMessage /> 資訊室回覆</span>
-                      <p className="text-sm text-slate-700 whitespace-pre-wrap">{req.reply}</p>
-                    </div>
-                  )}
+                  {req.reply && <div className="mt-4 bg-blue-50 p-4 rounded-xl border-l-4 border-blue-400 font-bold text-blue-800 text-sm"><IconMessage className="inline mr-1"/>回覆：{req.reply}</div>}
                 </div>
               ))}
             </div>
           )}
-
-          {zoomedImg && (
-            <div className="fixed inset-0 bg-black/90 z-[999] flex items-center justify-center p-4 cursor-zoom-out animate-in fade-in duration-200" onClick={() => setZoomedImg(null)}>
-              <img src={zoomedImg} alt="放大檢視" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
-            </div>
-          )}
+          {zoomedImg && <div className="fixed inset-0 bg-black/90 z-[999] flex items-center justify-center p-4 cursor-zoom-out" onClick={() => setZoomedImg(null)}><img src={zoomedImg} className="max-w-full max-h-[90vh] object-contain rounded-xl" /></div>}
         </div>
       );
     };
 
-    // 3. 處理看板 (管理員視角)
-    const AdminDashboard = ({ requests, onUpdateStatus, onDeleteRequest }) => {
+    // 3. 處理看板 (管理員)
+    const AdminDashboard = ({ requests, onUpdateStatus, onDeleteRequest, urgencyConfig }) => {
       const [editingId, setEditingId] = useState(null);
       const [editForm, setEditForm] = useState({ status: 'pending', reply: '', assignee: '', adminUrgency: '' });
-      const [zoomedImg, setZoomedImg] = useState(null);
-      const [sortOption, setSortOption] = useState('time_desc');
+      const [confirmDeleteId, setConfirmDeleteId] = useState(null);
 
-      const handleOpenEdit = (req) => {
-        setEditingId(req.id);
-        setEditForm({ status: req.status, reply: req.reply || '', assignee: req.assignee || '', adminUrgency: req.adminUrgency || '' });
-      };
-
-      const handleSaveEdit = () => {
-        onUpdateStatus(editingId, editForm.status, editForm.reply, editForm.assignee, editForm.adminUrgency);
-        setEditingId(null);
-      };
-
-      const sortedRequests = useMemo(() => {
-        return [...requests].sort((a, b) => {
-          switch(sortOption) {
-            case 'time_desc': return new Date(b.date).getTime() - new Date(a.date).getTime();
-            case 'time_asc': return new Date(a.date).getTime() - new Date(b.date).getTime();
-            case 'user_urgency': return (URGENCY_WEIGHT[b.userUrgency] || 0) - (URGENCY_WEIGHT[a.userUrgency] || 0);
-            case 'admin_urgency': return (URGENCY_WEIGHT[b.adminUrgency] || 0) - (URGENCY_WEIGHT[a.adminUrgency] || 0);
-            case 'unit': return (a.unit || '').localeCompare(b.unit || '');
-            case 'location': return (a.location || '').localeCompare(b.location || '');
-            case 'assignee': return (a.assignee || '').localeCompare(b.assignee || '');
-            case 'id': return b.id.localeCompare(a.id);
-            default: return 0;
-          }
-        });
-      }, [requests, sortOption]);
-
-      if (requests.length === 0) {
-        return (
-          <div className="bg-white rounded-3xl p-16 text-center text-slate-400 border border-slate-100 shadow-sm">
-            <p className="font-bold">目前無任何通報事項</p>
-          </div>
-        );
-      }
+      const sorted = useMemo(() => [...requests].sort((a, b) => new Date(b.date) - new Date(a.date)), [requests]);
 
       return (
         <div className="space-y-4 animate-in fade-in slide-in-from-bottom-4">
-          <div className="flex flex-col sm:flex-row gap-4 items-center justify-between bg-blue-50 p-4 rounded-2xl border border-blue-100">
-            <div className="flex items-center gap-3">
-              <IconAlert /> 
-              <span className="text-sm text-blue-800 font-bold">管理員專區：可查看所有聯絡個資與設定內部資訊。</span>
-            </div>
-            <div className="flex items-center gap-2 shrink-0">
-              <IconFilter />
-              <span className="text-sm font-bold text-slate-600">管理員排序：</span>
-              <select value={sortOption} onChange={e => setSortOption(e.target.value)} className="p-2 border rounded-lg text-sm outline-none bg-white focus:ring-2 focus:ring-blue-500">
-                <option value="time_desc">最新建檔</option>
-                <option value="time_asc">最舊建檔</option>
-                <option value="unit">單位名稱</option>
-                <option value="location">樓層/地點</option>
-                <option value="user_urgency">使用者緊急度 (高至低)</option>
-                <option value="admin_urgency">維修員緊急度 (高至低)</option>
-                <option value="assignee">維護人員</option>
-                <option value="id">單號</option>
-              </select>
-            </div>
-          </div>
-
-          <div className="text-sm text-slate-500 font-bold px-2">共有 {sortedRequests.length} 筆案件</div>
-
-          {sortedRequests.map(req => (
-            <div key={req.id} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 transition-all relative group">
-              <button onClick={() => { if(window.confirm('確定要刪除此單據嗎？')) onDeleteRequest(req.id) }} className="absolute top-4 right-4 text-red-400 hover:text-red-600 opacity-0 group-hover:opacity-100 transition-opacity p-2 bg-red-50 rounded-lg">
-                <IconTrash />
-              </button>
-
-              <div className="flex justify-between items-start mb-4 pr-12">
-                <div>
-                  <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <StatusBadge status={req.status} />
-                    <span className="text-xs font-bold text-slate-500">使用者回報:</span>
-                    <UrgencyBadge level={req.userUrgency} />
-                    {req.adminUrgency && (
-                      <span className="ml-2 text-xs font-bold text-purple-700 bg-purple-100 px-2 py-0.5 rounded border border-purple-200">內部評估: {req.adminUrgency}</span>
-                    )}
-                  </div>
-                  <h3 className="text-lg font-bold text-slate-800 mt-2">{req.title}</h3>
-                  <p className="text-xs text-slate-400 mt-1">單號: {req.id} • {req.date} {req.assignee ? `• 維護人: ${req.assignee}` : ''}</p>
+          <div className="bg-blue-50 p-4 rounded-2xl border border-blue-100 flex items-center gap-3"><IconAlert /><span className="text-sm text-blue-800 font-bold">管理員專區：共 {requests.length} 筆通報單</span></div>
+          {sorted.map(req => (
+            <div key={req.id} className="bg-white p-6 rounded-2xl shadow-sm border relative">
+              {confirmDeleteId === req.id ? (
+                <div className="absolute top-4 right-4 flex items-center gap-2 bg-red-50 px-3 py-1 rounded-lg border border-red-100">
+                  <span className="text-xs font-bold text-red-600">確認刪除？</span>
+                  <button onClick={() => { onDeleteRequest(req.id); setConfirmDeleteId(null); }} className="text-xs bg-red-600 text-white px-2 py-1 rounded">是</button>
+                  <button onClick={() => setConfirmDeleteId(null)} className="text-xs bg-slate-200 text-slate-700 px-2 py-1 rounded">否</button>
                 </div>
-              </div>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mb-4 text-sm bg-slate-50 p-4 rounded-xl border border-slate-100">
-                <div className="text-slate-700"><strong>單位：</strong> {req.unit}</div>
-                <div className="text-slate-700"><strong>設備：</strong> {req.deviceName}</div>
-                <div className="text-slate-700"><strong>通報人：</strong> {req.reporterName} ({req.jobTitle})</div>
-                <div className="text-slate-700"><strong>地點：</strong> {req.location || '未填寫'}</div>
-                <div className="md:col-span-2 text-indigo-700 font-medium pt-2 border-t border-slate-200 mt-1">
-                  聯絡方式 ➔ 電話: {req.phone || '無'} | 分機: {req.ext || '無'} | 手機: {req.mobile || '無'}
-                </div>
-              </div>
-              
-              <p className="text-sm text-slate-700 mb-4 whitespace-pre-wrap">{req.description}</p>
-              
-              {req.photos && req.photos.length > 0 && (
-                <div className="mb-4">
-                  <span className="block text-xs font-bold text-slate-500 mb-2">現場附件圖片 (點擊可放大)：</span>
-                  <div className="flex flex-wrap gap-2">
-                    {req.photos.map((p, idx) => (
-                      <img key={idx} src={p} alt="附件" onClick={() => setZoomedImg(p)} className="h-20 w-20 object-cover rounded-lg border shadow-sm hover:opacity-80 cursor-zoom-in transition-opacity" />
-                    ))}
-                  </div>
-                </div>
+              ) : (
+                <button onClick={() => setConfirmDeleteId(req.id)} className="absolute top-4 right-4 text-slate-300 hover:text-red-500"><IconTrash /></button>
               )}
-
+              
+              <div className="flex gap-2 mb-2"><StatusBadge status={req.status} /> <UrgencyBadge level={req.userUrgency} config={urgencyConfig}/> {req.adminUrgency && <span className="text-xs bg-purple-100 text-purple-700 px-2 rounded font-bold">內部: {req.adminUrgency}</span>}</div>
+              <h3 className="text-lg font-bold">{req.title}</h3>
+              <p className="text-xs text-slate-400 mb-2">{req.id} | {req.date}</p>
+              <div className="grid grid-cols-2 gap-2 text-sm bg-slate-50 p-3 rounded-xl border mb-3">
+                 <div><strong>單位:</strong> {req.unit}</div><div><strong>設備:</strong> {req.deviceName}</div>
+                 <div><strong>通報人:</strong> {req.reporterName}</div><div><strong>電話:</strong> {req.phone} {req.ext} {req.mobile}</div>
+              </div>
+              <p className="text-sm">{req.description}</p>
+              
               {editingId === req.id ? (
-                <div className="mt-4 p-4 bg-blue-50/50 rounded-xl border border-blue-100 space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div>
-                      <label className="text-sm font-bold text-slate-700 block mb-1">對外狀態：</label>
-                      <select value={editForm.status} onChange={e => setEditForm({...editForm, status: e.target.value})} className="w-full p-2 border rounded-lg outline-none bg-white text-sm focus:ring-2 focus:ring-blue-500">
-                        <option value="pending">待處理</option><option value="processing">處理中</option><option value="completed">已結案</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-sm font-bold text-purple-800 block mb-1">內部緊急度 (隱藏)：</label>
-                      <select value={editForm.adminUrgency} onChange={e => setEditForm({...editForm, adminUrgency: e.target.value})} className="w-full p-2 border rounded-lg outline-none bg-white text-sm focus:ring-2 focus:ring-purple-500">
-                        <option value="">未設定</option><option value="低">低</option><option value="中">中</option><option value="高">高</option><option value="緊急">緊急</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-sm font-bold text-indigo-800 block mb-1">指派維護人 (隱藏)：</label>
-                      <input value={editForm.assignee} onChange={e => setEditForm({...editForm, assignee: e.target.value})} className="w-full p-2 border rounded-lg outline-none bg-white text-sm focus:ring-2 focus:ring-indigo-500" placeholder="工程師姓名..." />
-                    </div>
+                <div className="mt-4 bg-blue-50 p-4 rounded-xl space-y-3 border border-blue-100">
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+                    <select value={editForm.status} onChange={e=>setEditForm({...editForm, status: e.target.value})} className="p-2 border rounded-lg text-sm bg-white"><option value="pending">待處理</option><option value="processing">處理中</option><option value="completed">已結案</option></select>
+                    <select value={editForm.adminUrgency} onChange={e=>setEditForm({...editForm, adminUrgency: e.target.value})} className="p-2 border rounded-lg text-sm bg-white"><option value="">內部緊急度</option>{urgencyConfig.map(u=><option key={u.id} value={u.name}>{u.name}</option>)}</select>
+                    <input value={editForm.assignee} onChange={e=>setEditForm({...editForm, assignee: e.target.value})} className="p-2 border rounded-lg text-sm bg-white" placeholder="指派人員" />
                   </div>
-                  <div>
-                    <label className="block text-sm font-bold text-slate-700 mb-2">公開處理回覆說明：</label>
-                    <textarea value={editForm.reply} onChange={e => setEditForm({...editForm, reply: e.target.value})} className="w-full p-3 border rounded-xl outline-none bg-white text-sm resize-none focus:ring-2 focus:ring-blue-500" rows="3" placeholder="請輸入回覆內容..."></textarea>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <button onClick={() => setEditingId(null)} className="px-4 py-2 text-sm font-medium text-slate-500 hover:bg-slate-200 rounded-lg transition-colors">取消</button>
-                    <button onClick={handleSaveEdit} className="px-4 py-2 text-sm font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm">儲存更新</button>
+                  <textarea value={editForm.reply} onChange={e=>setEditForm({...editForm, reply: e.target.value})} className="w-full p-3 border rounded-lg text-sm bg-white" rows="2" placeholder="公開回覆內容... (系統將自動寄信通知聯絡人)"></textarea>
+                  <div className="flex gap-2 justify-end">
+                    <button onClick={()=>setEditingId(null)} className="px-4 py-2 text-sm bg-slate-200 text-slate-700 font-bold rounded-lg hover:bg-slate-300">取消</button>
+                    <button onClick={()=>{onUpdateStatus(req.id, editForm.status, editForm.reply, editForm.assignee, editForm.adminUrgency, req.title); setEditingId(null);}} className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg font-bold shadow-md hover:bg-blue-700">儲存並通知</button>
                   </div>
                 </div>
               ) : (
-                <div className="mt-4 border-t pt-4 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-                  <div className="flex-1">
-                    {req.reply ? (
-                      <p className="text-sm text-slate-600 whitespace-pre-wrap"><strong className="text-slate-800">上次回覆：</strong>{req.reply}</p>
-                    ) : (
-                      <p className="text-sm text-slate-400 italic">尚未回覆</p>
-                    )}
-                  </div>
-                  <button onClick={() => handleOpenEdit(req)} className="shrink-0 px-4 py-2 text-sm font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors">
-                    編輯狀態與內部設定
-                  </button>
+                <div className="mt-4 pt-4 border-t flex justify-between items-center">
+                  <p className="text-sm text-slate-600 truncate mr-4"><strong>回覆：</strong> {req.reply || '尚未回覆'}</p>
+                  <button onClick={()=>{setEditingId(req.id); setEditForm({status: req.status, reply: req.reply||'', assignee: req.assignee||'', adminUrgency: req.adminUrgency||''});}} className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-600 font-bold rounded-lg text-sm shrink-0 transition-colors">編輯</button>
                 </div>
               )}
             </div>
           ))}
-
-          {zoomedImg && (
-            <div className="fixed inset-0 bg-black/90 z-[999] flex items-center justify-center p-4 cursor-zoom-out animate-in fade-in duration-200" onClick={() => setZoomedImg(null)}>
-              <img src={zoomedImg} alt="放大檢視" className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" />
-            </div>
-          )}
         </div>
       );
     };
 
-    // 4. 系統與介面設定 (超級管理員視角)
-// 這是整合後的完整 ConfigPage，請替換您原本的整段 ConfigPage 函數
-    const ConfigPage = ({ onSave, initLogo, initContact }) => {
-      const [fbStr, setFbStr] = useState(localStorage.getItem('cfg_firebase') || '');
-      const [geminiKey, setGeminiKey] = useState(localStorage.getItem('cfg_gemini_key') || '');
-      const [logoPreview, setLogoPreview] = useState(initLogo || '');
-      const [contactInfo, setContactInfo] = useState(initContact || INITIAL_CONTACT_INFO);
+    // 4. 財產管理 (擴充欄位與編輯)
+    const AssetsPage = ({ showToast }) => {
+      const [assets, setAssets] = useState(() => JSON.parse(localStorage.getItem('sys_assets') || '[]'));
+      const [newAsset, setNewAsset] = useState({ id: '', name: '', category: CATEGORIES[0], ipAddress: '', purchaseDate: '', usefulLife: 5, status: '正常' });
+      const [editingAssetId, setEditingAssetId] = useState(null);
+      const [editAssetData, setEditAssetData] = useState(null);
 
-      const handleLogoUpload = (e) => {
-        const file = e.target.files[0];
-        if (file) {
-          const reader = new FileReader();
-          reader.onloadend = () => setLogoPreview(reader.result);
-          reader.readAsDataURL(file);
-        }
+      useEffect(() => { localStorage.setItem('sys_assets', JSON.stringify(assets)); }, [assets]);
+
+      const handleAdd = (e) => {
+        e.preventDefault();
+        setAssets([...assets, { ...newAsset, uid: Date.now() }]);
+        setNewAsset({ id: '', name: '', category: CATEGORIES[0], ipAddress: '', purchaseDate: '', usefulLife: 5, status: '正常' });
+        showToast("✅ 資產新增成功");
       };
 
-      const handleSave = () => {
-        // 【Firebase 修正邏輯】：移除誤貼的變數名稱，確保存入的是純 JSON
-        let cleaned = fbStr.trim().replace(/^(const|var|let)\s+\w+\s*=\s*/, '').replace(/;$/, '').trim();
-        
-        try {
-          JSON.parse(cleaned); // 嚴格檢查格式
-          onSave(cleaned, geminiKey.trim(), logoPreview, contactInfo);
-          alert("✅ 設定儲存成功！");
-        } catch (err) {
-          alert("❌ 格式錯誤：請確保貼入的是有效的 JSON 物件（例如：{ \"apiKey\": ... }）");
-        }
+      const handleSaveEdit = () => {
+        setAssets(assets.map(a => a.uid === editingAssetId ? editAssetData : a));
+        setEditingAssetId(null);
+        showToast("✅ 資產更新成功");
       };
 
       return (
-        <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 space-y-6">
-          <h2 className="text-xl font-bold border-b pb-4">系統與介面設定</h2>
+        <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 animate-in fade-in space-y-6">
+          <div className="flex items-center gap-3 border-b pb-4 mb-6">
+            <div className="bg-emerald-100 p-2 rounded-xl text-emerald-600"><IconDatabase /></div>
+            <h2 className="text-xl font-bold text-slate-800">資訊財產管理</h2>
+          </div>
           
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-slate-50 p-4 rounded-2xl border">
-              <label className="block text-sm font-bold text-slate-700 mb-2">自訂系統 Logo</label>
-              <input type="file" accept="image/*" onChange={handleLogoUpload} className="w-full text-sm text-slate-500" />
+          {/* 新增區塊 */}
+          <form onSubmit={handleAdd} className="bg-slate-50 p-5 rounded-2xl border mb-6 grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+            <div className="md:col-span-4 text-sm font-bold text-slate-600 mb-1">新增資訊資產</div>
+            <div><label className="block text-xs text-slate-500 mb-1">編號</label><input required value={newAsset.id} onChange={e=>setNewAsset({...newAsset, id: e.target.value})} placeholder="例: PC-001" className="w-full p-2 border rounded-lg text-sm bg-white" /></div>
+            <div><label className="block text-xs text-slate-500 mb-1">設備名稱</label><input required value={newAsset.name} onChange={e=>setNewAsset({...newAsset, name: e.target.value})} placeholder="設備名稱" className="w-full p-2 border rounded-lg text-sm bg-white" /></div>
+            <div><label className="block text-xs text-slate-500 mb-1">類別</label>
+              <select value={newAsset.category} onChange={e=>setNewAsset({...newAsset, category: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white">
+                 {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            <div><label className="block text-xs text-slate-500 mb-1">IP 位置</label><input value={newAsset.ipAddress} onChange={e=>setNewAsset({...newAsset, ipAddress: e.target.value})} placeholder="例: 192.168.1.100" className="w-full p-2 border rounded-lg text-sm bg-white" /></div>
+            
+            <div><label className="block text-xs text-slate-500 mb-1">購買出廠日期</label><input type="date" required value={newAsset.purchaseDate} onChange={e=>setNewAsset({...newAsset, purchaseDate: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white" /></div>
+            <div><label className="block text-xs text-slate-500 mb-1">使用年限 (年)</label><input type="number" min="1" required value={newAsset.usefulLife} onChange={e=>setNewAsset({...newAsset, usefulLife: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white" /></div>
+            <div><label className="block text-xs text-slate-500 mb-1">狀態</label>
+               <select value={newAsset.status} onChange={e=>setNewAsset({...newAsset, status: e.target.value})} className="w-full p-2 border rounded-lg text-sm bg-white"><option value="正常">正常</option><option value="故障">故障</option><option value="報廢">報廢</option></select>
+            </div>
+            <button className="bg-emerald-600 hover:bg-emerald-700 text-white p-2 rounded-lg font-bold shadow-md transition-colors w-full h-9">新增資產</button>
+          </form>
+
+          {/* 列表清單 */}
+          <div className="overflow-x-auto excel-table">
+            <table className="w-full text-left text-sm border-collapse min-w-[800px]">
+               <thead><tr className="border-b bg-slate-50">
+                  <th className="p-3">編號</th><th className="p-3">名稱 / 類別</th><th className="p-3">IP 位置</th><th className="p-3">狀態</th>
+                  <th className="p-3">購買出廠日期</th><th className="p-3 text-center">使用年限</th><th className="p-3">保固與年限狀態計算</th><th className="p-3 text-center">操作</th>
+               </tr></thead>
+               <tbody>
+                  {assets.map(a => {
+                    const isEditing = editingAssetId === a.uid;
+                    const warranty = calculateWarranty(a.purchaseDate, a.usefulLife);
+                    return (
+                    <tr key={a.uid} className="border-b hover:bg-slate-50">
+                      {isEditing ? (
+                         <>
+                           <td className="p-2"><input value={editAssetData.id} onChange={e=>setEditAssetData({...editAssetData, id: e.target.value})} className="w-20 p-1 border rounded text-xs" /></td>
+                           <td className="p-2 space-y-1">
+                              <input value={editAssetData.name} onChange={e=>setEditAssetData({...editAssetData, name: e.target.value})} className="w-full p-1 border rounded text-xs" />
+                              <select value={editAssetData.category} onChange={e=>setEditAssetData({...editAssetData, category: e.target.value})} className="w-full p-1 border rounded text-xs">
+                                 {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+                              </select>
+                           </td>
+                           <td className="p-2"><input value={editAssetData.ipAddress} onChange={e=>setEditAssetData({...editAssetData, ipAddress: e.target.value})} className="w-24 p-1 border rounded text-xs" /></td>
+                           <td className="p-2"><select value={editAssetData.status} onChange={e=>setEditAssetData({...editAssetData, status: e.target.value})} className="p-1 border rounded text-xs"><option value="正常">正常</option><option value="故障">故障</option><option value="報廢">報廢</option></select></td>
+                           <td className="p-2"><input type="date" value={editAssetData.purchaseDate} onChange={e=>setEditAssetData({...editAssetData, purchaseDate: e.target.value})} className="p-1 border rounded text-xs" /></td>
+                           <td className="p-2 text-center"><input type="number" min="1" value={editAssetData.usefulLife} onChange={e=>setEditAssetData({...editAssetData, usefulLife: e.target.value})} className="w-12 p-1 border rounded text-xs text-center" /></td>
+                           <td className="p-2 text-xs text-slate-400">儲存後重新計算</td>
+                           <td className="p-2 text-center space-x-1">
+                              <button onClick={handleSaveEdit} className="bg-blue-600 text-white px-2 py-1 rounded text-xs font-bold">儲存</button>
+                              <button onClick={()=>setEditingAssetId(null)} className="bg-slate-300 text-slate-800 px-2 py-1 rounded text-xs">取消</button>
+                           </td>
+                         </>
+                      ) : (
+                         <>
+                           <td className="p-3 font-mono font-bold text-slate-700">{a.id}</td>
+                           <td className="p-3">
+                              <div className="font-bold text-slate-800">{a.name}</div>
+                              <div className="text-xs text-slate-400 mt-1">{a.category}</div>
+                           </td>
+                           <td className="p-3 font-mono text-xs">{a.ipAddress || '-'}</td>
+                           <td className="p-3"><span className={`px-2 py-1 rounded text-xs font-bold ${a.status==='正常'?'bg-green-100 text-green-700': a.status==='故障'?'bg-red-100 text-red-700':'bg-gray-200 text-gray-700'}`}>{a.status}</span></td>
+                           <td className="p-3 font-mono text-slate-600">{a.purchaseDate}</td>
+                           <td className="p-3 text-center font-bold text-slate-600">{a.usefulLife} 年</td>
+                           <td className="p-3"><span className={`flex items-center gap-1.5 font-medium text-xs ${warranty.color}`}>{warranty.icon} {warranty.text}</span></td>
+                           <td className="p-3 text-center space-x-2">
+                             <button onClick={()=>{setEditingAssetId(a.uid); setEditAssetData({...a});}} className="text-slate-400 hover:text-blue-600 transition-colors" title="編輯"><IconEdit/></button>
+                             <button onClick={() => { if(window.confirm('確定刪除此資產？')) setAssets(assets.filter(x=>x.uid!==a.uid)); }} className="text-slate-400 hover:text-red-500 transition-colors" title="刪除"><IconTrash/></button>
+                           </td>
+                         </>
+                      )}
+                    </tr>
+                  )})}
+               </tbody>
+            </table>
+          </div>
+        </div>
+      );
+    };
+
+    // 5. 網路拓譜圖
+    const TopologyPage = ({ isSuperAdmin, showToast }) => {
+       const [img, setImg] = useState(localStorage.getItem('sys_topology') || '');
+       const handleUpload = (e) => {
+         const file = e.target.files[0];
+         if(!file) return;
+         const reader = new FileReader();
+         reader.onloadend = () => { setImg(reader.result); localStorage.setItem('sys_topology', reader.result); showToast("✅ 拓譜圖已更新"); };
+         reader.readAsDataURL(file);
+       };
+       return (
+         <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 animate-in fade-in">
+            <div className="flex justify-between items-center border-b pb-4 mb-4">
+              <h2 className="text-xl font-bold flex items-center gap-2"><IconNetwork/> 網路拓譜圖</h2>
+              {isSuperAdmin && <label className="bg-indigo-100 text-indigo-700 px-3 py-1.5 rounded font-bold cursor-pointer text-sm">更新拓譜圖<input type="file" className="hidden" accept="image/*" onChange={handleUpload}/></label>}
+            </div>
+            {img ? <img src={img} className="w-full h-auto rounded-xl border shadow-sm"/> : <div className="p-12 text-center text-slate-400 bg-slate-50 rounded-xl">尚無拓譜圖資料</div>}
+         </div>
+       );
+    };
+
+    // 6. 軟體授權
+    const SoftwarePage = ({ isSuperAdmin, showToast }) => {
+      const [excelData, setExcelData] = useState(() => JSON.parse(localStorage.getItem('sys_software_excel') || '{}'));
+      const [activeTab, setActiveTab] = useState('');
+      
+      const sheetNames = Object.keys(excelData);
+      useEffect(() => { if(sheetNames.length > 0 && !activeTab) setActiveTab(sheetNames[0]); }, [sheetNames, activeTab]);
+
+      const handleExcelUpload = (e) => {
+        const file = e.target.files[0];
+        if(!file) return;
+        const reader = new FileReader();
+        reader.onload = (evt) => {
+           const wb = XLSX.read(evt.target.result, { type: 'binary' });
+           const parsedData = {};
+           wb.SheetNames.forEach(name => { parsedData[name] = XLSX.utils.sheet_to_html(wb.Sheets[name]); });
+           setExcelData(parsedData);
+           localStorage.setItem('sys_software_excel', JSON.stringify(parsedData));
+           setActiveTab(wb.SheetNames[0]);
+           showToast("✅ Excel 匯入成功！");
+        };
+        reader.readAsBinaryString(file);
+      };
+
+      return (
+         <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 animate-in fade-in h-full min-h-[60vh]">
+            <div className="flex flex-wrap justify-between items-center border-b pb-4 mb-4 gap-4">
+              <h2 className="text-xl font-bold flex items-center gap-2"><IconCode/> 軟體授權清單</h2>
+              {isSuperAdmin && <label className="bg-blue-600 hover:bg-blue-700 transition-colors text-white px-4 py-2 rounded-lg font-bold cursor-pointer text-sm shadow-md">上傳新版 Excel<input type="file" accept=".xlsx, .xls" className="hidden" onChange={handleExcelUpload}/></label>}
+            </div>
+
+            {sheetNames.length > 0 ? (
+              <div>
+                <div className="flex gap-2 border-b mb-4 overflow-x-auto">
+                  {sheetNames.map(name => (
+                    <button key={name} onClick={() => setActiveTab(name)} className={`px-4 py-2 text-sm font-bold border-b-2 transition-colors whitespace-nowrap ${activeTab === name ? 'border-blue-600 text-blue-600' : 'border-transparent text-slate-500'}`}>{name}</button>
+                  ))}
+                </div>
+                <div className="overflow-x-auto excel-table rounded-xl border border-slate-200" dangerouslySetInnerHTML={{ __html: excelData[activeTab] }}></div>
+              </div>
+            ) : (
+              <div className="p-16 text-center text-slate-400 bg-slate-50 rounded-xl border border-dashed font-bold mt-8">請由系統管理員上傳包含授權資料的 Excel 檔案</div>
+            )}
+         </div>
+      );
+    };
+
+    // 7. 系統設定 (加入 Email 設定)
+    const ConfigPage = ({ onSave, initLogo, initContact, urgencyConfig, onUpdateUrgencyConfig, emailConfig, onUpdateEmailConfig, showToast }) => {
+      const [fbStr, setFbStr] = useState(localStorage.getItem('cfg_firebase') || '');
+      const [logoPreview, setLogoPreview] = useState(initLogo || '');
+      const [contactInfo, setContactInfo] = useState(initContact || INITIAL_CONTACT_INFO);
+      const [localUrgency, setLocalUrgency] = useState(urgencyConfig);
+      
+      const [localEmails, setLocalEmails] = useState(emailConfig);
+      const [newEmail, setNewEmail] = useState('');
+      const [isTestingEmail, setIsTestingEmail] = useState(false);
+
+      const handleTestFirebase = () => {
+        let cleaned = fbStr.trim().replace(/^(const|var|let)\s+\w+\s*=\s*/, '').replace(/;$/, '').trim();
+        try {
+          const parsed = JSON.parse(cleaned);
+          setFbStr(JSON.stringify(parsed, null, 2));
+          showToast(parsed.apiKey ? "✅ 驗證成功！格式標準。" : "⚠️ JSON 合法但似乎缺少 apiKey。");
+        } catch { showToast("❌ 格式錯誤：請確保貼入的是純 JSON 物件。"); }
+      };
+
+      const handleSave = () => {
+        let cleanedFb = fbStr.trim().replace(/^(const|var|let)\s+\w+\s*=\s*/, '').replace(/;$/, '').trim();
+        try {
+          if (cleanedFb) JSON.parse(cleanedFb);
+          onUpdateUrgencyConfig(localUrgency);
+          onUpdateEmailConfig(localEmails);
+          onSave(cleanedFb, logoPreview, contactInfo);
+          showToast("✅ 所有系統設定已儲存成功！");
+        } catch { showToast("❌ 儲存失敗：Firebase Config 格式錯誤。"); }
+      };
+
+      const handleAddEmail = () => {
+        if (!newEmail.includes('@')) { showToast("❌ 請輸入有效的 Email 格式"); return; }
+        setLocalEmails([...localEmails, { id: Date.now(), address: newEmail, active: true }]);
+        setNewEmail('');
+      };
+
+      const handleTestEmail = () => {
+        const activeCount = localEmails.filter(e => e.active).length;
+        if (activeCount === 0) { showToast("⚠️ 請先勾選至少一個 Email 聯絡人"); return; }
+        
+        setIsTestingEmail(true);
+        // 模擬延遲發信
+        setTimeout(() => {
+           setIsTestingEmail(false);
+           showToast(`✅ 測試成功！已模擬發送測試信至 ${activeCount} 個聯絡人。`);
+        }, 1500);
+      };
+
+      return (
+        <div className="bg-white p-6 md:p-8 rounded-3xl shadow-sm border border-slate-100 animate-in fade-in space-y-8">
+          <div className="flex items-center gap-3 border-b pb-4"><div className="bg-slate-800 p-2 rounded-xl text-white"><IconSettings /></div><h2 className="text-xl font-bold text-slate-800">系統與介面設定</h2></div>
+          
+          {/* Email 通知設定 */}
+          <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100 shadow-inner">
+            <div className="flex justify-between items-center mb-4">
+              <div>
+                <label className="block text-sm font-bold text-slate-800 flex items-center gap-2"><IconMail /> 系統通知 Email 設定</label>
+                <p className="text-xs text-slate-500 mt-1">當有新通報或管理員回覆時，系統將自動寄信通知下方已勾選的聯絡人。</p>
+              </div>
+              <button onClick={handleTestEmail} disabled={isTestingEmail} className={`flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm transition-all shadow-sm ${isTestingEmail ? 'bg-slate-300 text-slate-500 cursor-wait' : 'bg-white border border-blue-200 text-blue-600 hover:bg-blue-50'}`}>
+                {isTestingEmail ? <span className="animate-spin"><IconSettings /></span> : <IconMail />}
+                {isTestingEmail ? '正在發送...' : '發送測試信'}
+              </button>
             </div>
             
+            <div className="flex gap-2 mb-4">
+              <input value={newEmail} onChange={e=>setNewEmail(e.target.value)} placeholder="輸入新的 Email 信箱..." className="flex-1 p-2.5 border border-blue-200 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500 bg-white" />
+              <button onClick={handleAddEmail} className="bg-blue-600 text-white px-4 py-2.5 rounded-lg text-sm font-bold shadow-md hover:bg-blue-700 transition-colors">新增聯絡人</button>
+            </div>
+
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-2">
+               {localEmails.length === 0 ? <p className="text-xs text-slate-400 italic">尚未設定任何 Email 聯絡人。</p> : 
+                localEmails.map((email, idx) => (
+                  <div key={email.id} className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                       <input type="checkbox" checked={email.active} onChange={()=>{const n=[...localEmails]; n[idx].active = !n[idx].active; setLocalEmails(n);}} className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500" />
+                       <span className={`text-sm font-medium ${email.active ? 'text-slate-800' : 'text-slate-400 line-through'}`}>{email.address}</span>
+                    </label>
+                    <button onClick={() => setLocalEmails(localEmails.filter(e => e.id !== email.id))} className="text-slate-300 hover:text-red-500 transition-colors p-1"><IconTrash /></button>
+                  </div>
+               ))}
+            </div>
+          </div>
+
+          <div className="bg-slate-50 p-6 rounded-2xl border">
+            <div className="flex justify-between items-center mb-4"><label className="block text-sm font-bold text-slate-700">自訂緊急程度分級</label><button onClick={() => setLocalUrgency([...localUrgency, { id: 'u'+Date.now(), name: '新等級', weight: 1, color: 'bg-gray-100 text-gray-700' }])} className="text-xs bg-blue-100 text-blue-700 px-3 py-1.5 rounded font-bold shadow-sm hover:bg-blue-200">+ 新增</button></div>
+            <div className="space-y-2">
+               {localUrgency.map((u, i) => (
+                  <div key={u.id} className="flex gap-2">
+                     <input className="p-2 border rounded w-1/4 text-sm" value={u.name} onChange={e=>{const n=[...localUrgency];n[i].name=e.target.value;setLocalUrgency(n)}}/>
+                     <input className="p-2 border rounded w-1/6 text-sm" type="number" value={u.weight} onChange={e=>{const n=[...localUrgency];n[i].weight=Number(e.target.value);setLocalUrgency(n)}}/>
+                     <input className="p-2 border rounded flex-1 text-sm font-mono" value={u.color} onChange={e=>{const n=[...localUrgency];n[i].color=e.target.value;setLocalUrgency(n)}}/>
+                     <button onClick={() => setLocalUrgency(localUrgency.filter((_, idx) => idx !== i))} className="text-red-500 px-2"><IconTrash /></button>
+                  </div>
+               ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="bg-slate-50 p-4 rounded-2xl border">
-              <label className="block text-sm font-bold text-slate-700 mb-2">聯絡人與問題反饋資訊</label>
-              <textarea rows="4" className="w-full p-3 border rounded-xl text-sm" value={contactInfo} onChange={e => setContactInfo(e.target.value)}></textarea>
+              <label className="block text-sm font-bold mb-2">自訂系統 Logo</label>
+              <input type="file" accept="image/*" onChange={(e)=>{const f=e.target.files[0];if(f){const r=new FileReader();r.onloadend=()=>setLogoPreview(r.result);r.readAsDataURL(f);}}} className="w-full text-sm text-slate-500 mb-2"/>
+              {logoPreview && <img src={logoPreview} className="h-8 object-contain bg-white p-1 border rounded" />}
+            </div>
+            <div className="bg-slate-50 p-4 rounded-2xl border">
+              <label className="block text-sm font-bold mb-2">聯絡人資訊 (前台顯示)</label>
+              <textarea rows="3" className="w-full p-3 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-blue-500 resize-none" value={contactInfo} onChange={e=>setContactInfo(e.target.value)}></textarea>
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Firebase Firestore Config (純 JSON)</label>
-            <textarea 
-              rows="6" 
-              placeholder="請在此貼上 Firebase Config (純 JSON 格式)" 
-              className="w-full p-4 bg-slate-50 border rounded-xl font-mono text-xs"
-              value={fbStr} 
-              onChange={e => setFbStr(e.target.value)}
-            ></textarea>
+            <label className="block text-sm font-bold mb-2">雲端即時連線資料庫設定 (Firebase JSON)</label>
+            <textarea rows="4" className="w-full p-4 bg-slate-50 border rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-500 resize-none" value={fbStr} onChange={e=>setFbStr(e.target.value)}></textarea>
+            <button onClick={handleTestFirebase} className="mt-2 bg-blue-100 text-blue-700 font-bold px-4 py-2 rounded-lg text-sm shadow-sm hover:bg-blue-200">驗證格式</button>
           </div>
-
-          <button onClick={handleSave} className="w-full bg-blue-600 text-white font-bold py-3 rounded-xl">
-            儲存所有配置
-          </button>
+          <button onClick={handleSave} className="w-full bg-slate-800 text-white font-bold py-4 rounded-xl hover:bg-slate-900 shadow-xl transition-all active:scale-[0.99]">儲存所有配置</button>
         </div>
       );
     };
 
+    const ContactPage = ({ info }) => (
+      <div className="bg-white p-12 rounded-3xl text-center shadow-sm border"><div className="bg-blue-50 text-blue-600 p-4 rounded-full mb-6 inline-block"><IconPhone /></div><h2 className="text-2xl font-black mb-4">聯絡資訊</h2><p className="whitespace-pre-wrap text-slate-700 leading-relaxed font-medium">{info}</p></div>
+    );
 
-    // 5. 聯絡資訊 (開放視角)
-    const ContactPage = ({ info }) => {
-      return (
-        <div className="bg-white p-6 md:p-12 rounded-3xl shadow-sm border border-slate-100 animate-in fade-in slide-in-from-bottom-4 flex flex-col items-center text-center">
-          <div className="bg-blue-50 text-blue-600 p-4 rounded-full mb-6">
-            <IconPhone />
-          </div>
-          <h2 className="text-2xl font-black text-slate-800 mb-4">問題反饋與聯絡資訊</h2>
-          <div className="bg-slate-50 p-6 rounded-2xl w-full max-w-lg text-left border border-slate-100 shadow-inner">
-            <p className="whitespace-pre-wrap text-slate-700 leading-relaxed font-medium">
-              {info || '目前無聯絡資訊。'}
-            </p>
-          </div>
-        </div>
-      );
-    };
-
-    // 6. 帳號管理 (超級管理員視角)
+    // 8. 帳號管理 (超級管理員視角)
     const AccountsPage = ({ accounts, onAddAccount, onEditAccount, onDeleteAccount }) => {
       const [newAcc, setNewAcc] = useState({ username: '', password: '', name: '', role: 'admin_level2', expiryDate: '' });
       const [editingId, setEditingId] = useState(null);
@@ -692,14 +692,14 @@
               <span className="text-sm font-bold text-slate-600">{editingId ? '✏️ 編輯帳號資料' : '新增帳號'}</span>
               {editingId && <button type="button" onClick={() => {setEditingId(null); setNewAcc({ username: '', password: '', name: '', role: 'admin_level2', expiryDate: '' });}} className="text-xs text-slate-500 hover:underline">取消編輯</button>}
             </div>
-            <input required value={newAcc.username} onChange={e=>setNewAcc({...newAcc, username: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm" placeholder="帳號 (如: user01)" />
-            <input required value={newAcc.password} onChange={e=>setNewAcc({...newAcc, password: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm" placeholder="密碼" />
-            <input required value={newAcc.name} onChange={e=>setNewAcc({...newAcc, name: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm" placeholder="姓名" />
-            <select value={newAcc.role} onChange={e=>setNewAcc({...newAcc, role: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm">
+            <input required value={newAcc.username} onChange={e=>setNewAcc({...newAcc, username: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm outline-none" placeholder="帳號 (如: user01)" />
+            <input required value={newAcc.password} onChange={e=>setNewAcc({...newAcc, password: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm outline-none" placeholder="密碼" />
+            <input required value={newAcc.name} onChange={e=>setNewAcc({...newAcc, name: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm outline-none" placeholder="姓名" />
+            <select value={newAcc.role} onChange={e=>setNewAcc({...newAcc, role: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm outline-none">
               <option value="admin_level2">一般管理員</option><option value="super_admin">超級管理員</option>
             </select>
-            <input type="date" value={newAcc.expiryDate} onChange={e=>setNewAcc({...newAcc, expiryDate: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm" />
-            <button type="submit" className={`text-white font-bold p-2.5 rounded-xl text-sm ${editingId ? 'bg-indigo-600' : 'bg-slate-800'}`}>{editingId ? '儲存' : '新增'}</button>
+            <input type="date" value={newAcc.expiryDate} onChange={e=>setNewAcc({...newAcc, expiryDate: e.target.value})} className="p-2.5 rounded-xl border focus:ring-2 focus:ring-blue-500 text-sm outline-none" />
+            <button type="submit" className={`text-white font-bold p-2.5 rounded-xl text-sm transition-colors ${editingId ? 'bg-indigo-600 hover:bg-indigo-700' : 'bg-slate-800 hover:bg-slate-900'}`}>{editingId ? '儲存' : '新增'}</button>
           </form>
 
           <div className="overflow-x-auto">
@@ -713,8 +713,8 @@
                     <td className="py-4 px-4 text-slate-500">{acc.expiryDate || '永久有效'}</td>
                     <td className="py-4 px-4 text-center">
                       <div className="flex justify-center gap-1">
-                        <button onClick={() => {setNewAcc(acc); setEditingId(acc.id);}} className="text-slate-400 hover:text-blue-600 p-2 rounded-full"><IconEdit /></button>
-                        {acc.username !== 'admin' && <button onClick={() => onDeleteAccount(acc.id)} className="text-slate-400 hover:text-red-500 p-2 rounded-full"><IconTrash /></button>}
+                        <button onClick={() => {setNewAcc(acc); setEditingId(acc.id);}} className="text-slate-400 hover:text-blue-600 p-2 rounded-full transition-colors"><IconEdit /></button>
+                        {acc.username !== 'admin' && <button onClick={() => onDeleteAccount(acc.id)} className="text-slate-400 hover:text-red-500 p-2 rounded-full transition-colors"><IconTrash /></button>}
                       </div>
                     </td>
                   </tr>
@@ -732,146 +732,164 @@
     function App() {
       const [userRole, setUserRole] = useState('guest'); 
       const [userName, setUserName] = useState('');
-      const [currentUserId, setCurrentUserId] = useState(''); 
       const [activePage, setActivePage] = useState('report');
-      
       const [showLoginModal, setShowLoginModal] = useState(false);
       
-      const [loginError, setLoginError] = useState('');
       const [toastMsg, setToastMsg] = useState('');
+      const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3500); };
+
+      // 連線與同步機制
+      const [isOnline, setIsOnline] = useState(navigator.onLine);
+      const [syncQueue, setSyncQueue] = useState(() => JSON.parse(localStorage.getItem('sys_sync_queue') || '[]'));
+      const connectionMode = localStorage.getItem('cfg_firebase') ? '雲端模式' : '本地模式';
+
+      useEffect(() => {
+        const handleOnline = () => { setIsOnline(true); autoSync(); };
+        const handleOffline = () => setIsOnline(false);
+        window.addEventListener('online', handleOnline);
+        window.addEventListener('offline', handleOffline);
+        return () => { window.removeEventListener('online', handleOnline); window.removeEventListener('offline', handleOffline); }
+      }, [syncQueue]);
+
+      useEffect(() => { localStorage.setItem('sys_sync_queue', JSON.stringify(syncQueue)); }, [syncQueue]);
+
+      const autoSync = () => {
+         if (syncQueue.length === 0) return;
+         showToast(`📡 網路已恢復！已自動同步 ${syncQueue.length} 筆單據。`);
+         setRequests(prev => [...syncQueue, ...prev]);
+         setSyncQueue([]);
+      };
+
+      const handleManualSync = () => {
+         if (!isOnline) { showToast("⚠️ 目前沒有網路，無法同步"); return; }
+         autoSync();
+      };
 
       const [customLogo, setCustomLogo] = useState(localStorage.getItem('sys_logo') || '');
       const [contactInfo, setContactInfo] = useState(localStorage.getItem('sys_contact') || INITIAL_CONTACT_INFO);
+      const [urgencyConfig, setUrgencyConfig] = useState(() => JSON.parse(localStorage.getItem('sys_urgency_config')) || DEFAULT_URGENCY_CONFIG);
+      const [emailConfig, setEmailConfig] = useState(() => JSON.parse(localStorage.getItem('sys_email_config')) || []);
+      const [requests, setRequests] = useState(() => JSON.parse(localStorage.getItem('sys_requests')) || []);
+      const [accounts, setAccounts] = useState(() => JSON.parse(localStorage.getItem('sys_accounts')) || INITIAL_ACCOUNTS);
 
-      const [accounts, setAccounts] = useState(() => {
-        const saved = localStorage.getItem('sys_accounts');
-        return saved ? JSON.parse(saved) : INITIAL_ACCOUNTS;
-      });
-
-      const [requests, setRequests] = useState(() => {
-        const saved = localStorage.getItem('sys_requests');
-        return saved ? JSON.parse(saved) : [];
-      });
-
+      useEffect(() => { localStorage.setItem('sys_requests', JSON.stringify(requests)); }, [requests]);
       useEffect(() => { localStorage.setItem('sys_accounts', JSON.stringify(accounts)); }, [accounts]);
-      useEffect(() => { 
-        try { localStorage.setItem('sys_requests', JSON.stringify(requests)); } 
-        catch (e) { alert('系統警告：瀏覽器暫存空間已滿，請刪除舊報修單或照片。'); }
-      }, [requests]);
 
-      const showToast = (msg) => { setToastMsg(msg); setTimeout(() => setToastMsg(''), 3000); };
+      const handleUpdateUrgencyConfig = (newConfig) => {
+        setUrgencyConfig(newConfig);
+        localStorage.setItem('sys_urgency_config', JSON.stringify(newConfig));
+      };
+
+      const handleUpdateEmailConfig = (newEmails) => {
+        setEmailConfig(newEmails);
+        localStorage.setItem('sys_email_config', JSON.stringify(newEmails));
+      };
+
+      // 模擬發送 Email
+      const simulateSendEmail = (subject) => {
+        const activeEmails = emailConfig.filter(e => e.active);
+        if (activeEmails.length > 0) {
+            console.log(`[Email 模擬發送] 標題: ${subject} | 收件人: ${activeEmails.map(e=>e.address).join(', ')}`);
+            setTimeout(() => {
+                showToast(`📧 已同步發送通知信至 ${activeEmails.length} 個聯絡人`);
+            }, 800); // 模擬稍微延遲感
+        }
+      };
 
       const handleLogin = (e) => {
         e.preventDefault();
         const fd = new FormData(e.target);
-        const inputUser = fd.get('username');
-        const inputPass = fd.get('password');
-        
-        const matchedAcc = accounts.find(a => a.username === inputUser && a.password === inputPass);
-
-        if (matchedAcc) {
-          setUserRole(matchedAcc.role); setUserName(matchedAcc.name); setCurrentUserId(matchedAcc.id);
-          setActivePage('dashboard'); setShowLoginModal(false); setLoginError('');
-          showToast(`✅ ${matchedAcc.name} 登入成功`);
-        } else {
-          setLoginError('❌ 登入失敗：帳號或密碼輸入錯誤！');
-        }
-      };
-
-      const handleLogout = () => {
-        setUserRole('guest'); setUserName(''); setCurrentUserId(''); setActivePage('report');
-        showToast('👋 已登出系統');
-      };
-
-      const handleSaveConfig = (fbStr, geminiKey, newLogo, newContact) => {
-        localStorage.setItem('cfg_firebase', fbStr);
-        localStorage.setItem('cfg_gemini_key', geminiKey);
-        localStorage.setItem('sys_logo', newLogo);
-        localStorage.setItem('sys_contact', newContact);
-        setCustomLogo(newLogo);
-        setContactInfo(newContact);
-        showToast('⚙️ 設定已全面保存！');
+        const matched = accounts.find(a => a.username === fd.get('username') && a.password === fd.get('password'));
+        if (matched) { setUserRole(matched.role); setUserName(matched.name); setActivePage('dashboard'); setShowLoginModal(false); showToast(`✅ ${matched.name} 登入成功`); } 
+        else { showToast('❌ 登入失敗：帳號或密碼錯誤！'); }
       };
 
       const handleSubmitRequest = (formData) => {
-        const finalUnit = formData.unit === '其他' ? formData.otherUnit : formData.unit;
-        const finalJobTitle = formData.jobTitle === '其他' ? formData.otherJobTitle : formData.jobTitle;
+        const reqTitle = formData.title || '無主旨';
+        const req = { ...formData, id: `REQ-${Date.now().toString().slice(-5)}`, status: 'pending', date: new Date().toLocaleString('zh-TW', { hour12: false }) };
         
-        let finalDeviceName = '';
-        if (formData.isManagedAsset === '是') finalDeviceName = `列管資產: ${formData.assetId}`;
-        else if (formData.isManagedAsset === '其他') finalDeviceName = `非列管/其他: ${formData.otherAsset}`;
-        else finalDeviceName = '非列管設備';
-
-        const newReq = {
-          ...formData,
-          unit: finalUnit,
-          jobTitle: finalJobTitle,
-          deviceName: finalDeviceName,
-          id: `REQ-${Date.now().toString().slice(-5)}`,
-          status: 'pending',
-          date: new Date().toLocaleString('zh-TW', { hour12: false }),
-          reply: '',
-          assignee: '',
-          adminUrgency: ''
-        };
-        
-        setRequests([newReq, ...requests]);
+        if (isOnline) {
+            setRequests([req, ...requests]);
+            showToast('🚀 通報單已成功送出！');
+            simulateSendEmail(`[新通報] ${reqTitle}`);
+        } else {
+            setSyncQueue([req, ...syncQueue]);
+            showToast('⚠️ 無網路連線，單據已儲存於本機，待網路恢復將自動上傳。');
+        }
         setActivePage('history');
-        showToast('🚀 通報單已成功送出！');
       };
 
-      const handleUpdateStatus = (id, newStatus, newReply, newAssignee, newAdminUrgency) => {
-        setRequests(requests.map(req => req.id === id ? { ...req, status: newStatus, reply: newReply, assignee: newAssignee, adminUrgency: newAdminUrgency } : req));
-        showToast('💾 處理狀態與內部設定已更新');
+      const handleUpdateStatus = (id, status, reply, assignee, adminUrgency, title) => {
+        setRequests(requests.map(req => req.id === id ? { ...req, status, reply, assignee, adminUrgency } : req));
+        showToast('💾 狀態已更新儲存');
+        if (reply) {
+            simulateSendEmail(`[回覆通知] 關於您的通報: ${title}`);
+        }
+      };
+
+      const handleAddAccount = (accData) => {
+        const newAcc = { ...accData, id: `ACC-${Date.now()}` };
+        setAccounts([...accounts, newAcc]);
+        showToast('👥 新帳號已建立');
+      };
+
+      const handleEditAccount = (id, updatedData) => {
+        setAccounts(accounts.map(a => a.id === id ? { ...updatedData, id } : a));
+        showToast('✅ 帳號資料已更新');
+      };
+
+      const handleDeleteAccount = (id) => {
+        setAccounts(accounts.filter(a => a.id !== id));
+        showToast('🗑️ 帳號已刪除');
       };
 
       const NavTab = ({ id, icon, label, isActive }) => (
-        <button onClick={() => setActivePage(id)} className={`flex items-center gap-2 py-4 border-b-2 font-bold text-sm transition-colors whitespace-nowrap px-2 ${isActive ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>
-          {icon} {label}
-        </button>
+        <button onClick={() => setActivePage(id)} className={`flex items-center gap-2 py-4 border-b-2 font-bold text-sm transition-colors whitespace-nowrap px-3 ${isActive ? 'border-blue-600 text-blue-700' : 'border-transparent text-slate-500 hover:text-slate-800'}`}>{icon} {label}</button>
       );
 
       return (
-        <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800">
-          
-          <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-10">
-            <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="min-h-screen bg-slate-50 flex flex-col font-sans text-slate-800 relative">
+          <header className="bg-white border-b border-slate-200 shadow-sm sticky top-0 z-50">
+            <div className="max-w-6xl mx-auto px-4">
               <div className="flex justify-between items-center py-4">
                 <div className="flex items-center gap-3">
-                  {customLogo ? (
-                    <img src={customLogo} alt="系統Logo" className="h-10 w-auto object-contain" />
-                  ) : (
-                    <div className="bg-blue-600 p-2 rounded-xl text-white shadow-sm"><IconDashboard /></div>
-                  )}
+                  {customLogo ? <img src={customLogo} className="h-10 w-auto object-contain" /> : <div className="bg-blue-600 p-2 rounded-xl text-white shadow-sm"><IconDashboard /></div>}
                   <div>
-                    <h1 className="font-extrabold text-xl tracking-tight hidden sm:block">仁德醫療 - 資訊室服務台</h1>
-                    <h1 className="font-extrabold text-xl tracking-tight sm:hidden">資訊服務台</h1>
-                    <p className="text-[10px] text-slate-400 mt-0.5">內部障礙通報管理系統</p>
+                    <h1 className="font-extrabold text-xl tracking-tight">仁德醫療 - 資訊室服務台</h1>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-[10px] text-slate-400 bg-slate-100 px-2 py-0.5 rounded font-bold">{connectionMode}</p>
+                      <p className={`text-[10px] px-2 py-0.5 rounded font-bold flex items-center gap-1 ${isOnline ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                         {isOnline ? <IconCloud/> : <IconCloudOff/>} {isOnline ? '已連線' : '離線中'}
+                      </p>
+                      {syncQueue.length > 0 && (
+                        <button onClick={handleManualSync} className="text-[10px] bg-yellow-400 text-yellow-900 px-2 py-0.5 rounded font-bold hover:bg-yellow-500 shadow-sm transition-all">
+                           一鍵同步 ({syncQueue.length})
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
                 <div>
                   {userRole !== 'guest' ? (
-                    <div className="flex items-center gap-4">
-                      <span className="text-sm font-bold text-slate-600">{userName}</span>
-                      <button onClick={handleLogout} className="text-sm font-bold text-slate-400 hover:text-red-500">登出</button>
-                    </div>
+                    <div className="flex items-center gap-4"><span className="text-sm font-bold text-slate-600"><IconUsers className="inline w-4 h-4 mr-1"/>{userName}</span><button onClick={()=>{setUserRole('guest'); showToast('👋 已登出系統');}} className="text-sm font-bold text-red-500 hover:text-red-700 bg-red-50 px-3 py-1.5 rounded-lg transition-colors">登出</button></div>
                   ) : (
-                    <button onClick={() => {setShowLoginModal(true); setLoginError('');}} className="text-sm font-bold text-slate-500 hover:text-blue-600 bg-slate-50 hover:bg-blue-50 px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-                      <IconSettings /> 登入後台
-                    </button>
+                    <button onClick={() => setShowLoginModal(true)} className="text-sm font-bold text-blue-600 hover:text-white bg-blue-50 hover:bg-blue-600 px-4 py-2 rounded-lg transition-colors shadow-sm">登入後台</button>
                   )}
                 </div>
               </div>
 
-              <div className="flex gap-6 overflow-x-auto scrollbar-hide -mb-px">
-                <NavTab id="report" isActive={activePage === 'report'} icon={<IconAlert />} label="填寫通報單" />
+              <div className="flex gap-2 overflow-x-auto scrollbar-hide -mb-px">
+                <NavTab id="report" isActive={activePage === 'report'} icon={<IconAlert />} label="填寫通報" />
                 <NavTab id="history" isActive={activePage === 'history'} icon={<IconList />} label="進度查詢" />
                 <NavTab id="contact" isActive={activePage === 'contact'} icon={<IconPhone />} label="聯絡資訊" />
                 
                 {userRole !== 'guest' && (
                   <>
-                    <div className="w-[2px] h-4 bg-slate-200 self-center rounded-full mx-2"></div>
+                    <div className="w-[2px] h-4 bg-slate-200 self-center rounded-full mx-2 shrink-0"></div>
                     <NavTab id="dashboard" isActive={activePage === 'dashboard'} icon={<IconDashboard />} label="處理看板" />
+                    <NavTab id="assets" isActive={activePage === 'assets'} icon={<IconDatabase />} label="財產管理" />
+                    <NavTab id="topology" isActive={activePage === 'topology'} icon={<IconNetwork />} label="網路拓譜" />
+                    <NavTab id="software" isActive={activePage === 'software'} icon={<IconCode />} label="軟體授權" />
                     {userRole === 'super_admin' && (
                       <>
                         <NavTab id="accounts" isActive={activePage === 'accounts'} icon={<IconUsers />} label="帳號管理" />
@@ -884,34 +902,39 @@
             </div>
           </header>
 
-          <main className="flex-1 w-full max-w-5xl mx-auto p-4 sm:p-6 lg:p-8">
-            {activePage === 'report' && <ReportPage onSubmitForm={handleSubmitRequest} />}
-            {activePage === 'history' && <HistoryPage requests={requests} />}
+          <main className="flex-1 w-full max-w-6xl mx-auto p-4 sm:p-6 lg:p-8">
+            {activePage === 'report' && <ReportPage onSubmitForm={handleSubmitRequest} urgencyConfig={urgencyConfig} isOnline={isOnline} showToast={showToast} />}
+            {activePage === 'history' && <HistoryPage requests={requests} urgencyConfig={urgencyConfig} />}
             {activePage === 'contact' && <ContactPage info={contactInfo} />}
-            {activePage === 'dashboard' && userRole !== 'guest' && <AdminDashboard requests={requests} onUpdateStatus={handleUpdateStatus} onDeleteRequest={(id) => setRequests(requests.filter(r => r.id !== id))} />}
-            {activePage === 'accounts' && userRole === 'super_admin' && <AccountsPage accounts={accounts} onAddAccount={(newAcc) => setAccounts([...accounts, { ...newAcc, id: `ACC-${Date.now()}` }])} onEditAccount={(id, data) => setAccounts(accounts.map(a => a.id === id ? { ...data, id } : a))} onDeleteAccount={(id) => setAccounts(accounts.filter(a => a.id !== id))} />}
-            {activePage === 'config' && userRole === 'super_admin' && <ConfigPage onSave={handleSaveConfig} initLogo={customLogo} initContact={contactInfo} />}
+            {activePage === 'dashboard' && userRole !== 'guest' && <AdminDashboard requests={requests} onUpdateStatus={handleUpdateStatus} onDeleteRequest={(id) => {setRequests(requests.filter(r => r.id !== id)); showToast('🗑️ 單據已刪除');}} urgencyConfig={urgencyConfig} />}
+            {activePage === 'assets' && userRole !== 'guest' && <AssetsPage showToast={showToast} />}
+            {activePage === 'topology' && userRole !== 'guest' && <TopologyPage isSuperAdmin={userRole === 'super_admin'} showToast={showToast} />}
+            {activePage === 'software' && userRole !== 'guest' && <SoftwarePage isSuperAdmin={userRole === 'super_admin'} showToast={showToast} />}
+            {activePage === 'accounts' && userRole === 'super_admin' && <AccountsPage accounts={accounts} onAddAccount={handleAddAccount} onEditAccount={handleEditAccount} onDeleteAccount={handleDeleteAccount} />}
+            {activePage === 'config' && userRole === 'super_admin' && <ConfigPage onSave={(fb, l, c) => {localStorage.setItem('cfg_firebase', fb); localStorage.setItem('sys_logo', l); localStorage.setItem('sys_contact', c); setCustomLogo(l); setContactInfo(c);}} initLogo={customLogo} initContact={contactInfo} urgencyConfig={urgencyConfig} onUpdateUrgencyConfig={handleUpdateUrgencyConfig} emailConfig={emailConfig} onUpdateEmailConfig={handleUpdateEmailConfig} showToast={showToast} />}
           </main>
 
           {showLoginModal && (
-            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-              <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl relative">
-                <button onClick={() => setShowLoginModal(false)} className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 bg-slate-100 hover:bg-slate-200 p-2 rounded-full"><IconClose /></button>
-                <div className="text-center mb-6">
-                  <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4"><IconSettings /></div>
-                  <h2 className="text-xl font-bold text-slate-800">管理員登入</h2>
-                </div>
-                {loginError && <div className="mb-4 bg-red-50 text-red-600 text-sm font-bold p-3 rounded-xl border border-red-100 text-center">{loginError}</div>}
+            <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-in fade-in">
+              <div className="bg-white w-full max-w-sm rounded-3xl p-8 shadow-2xl relative animate-in zoom-in-95">
+                <button onClick={() => setShowLoginModal(false)} className="absolute top-4 right-4 text-slate-400 p-2 hover:bg-slate-100 rounded-full transition-colors"><IconClose /></button>
+                <div className="flex justify-center mb-4 text-blue-600"><IconSettings /></div>
+                <h2 className="text-xl font-bold text-center mb-6 text-slate-800">管理員登入</h2>
                 <form onSubmit={handleLogin} className="space-y-4">
-                  <input name="username" placeholder="帳號 (預設: admin)" className="w-full p-3.5 bg-slate-50 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" required />
-                  <input name="password" type="password" placeholder="密碼 (預設: admin123)" className="w-full p-3.5 bg-slate-50 border rounded-xl focus:ring-2 focus:ring-blue-500 outline-none text-sm" required />
-                  <button type="submit" className="w-full bg-slate-800 text-white font-bold py-3.5 rounded-xl hover:bg-slate-900 transition-colors shadow-md">登入</button>
+                  <input name="username" placeholder="帳號 (預設: admin)" className="w-full p-3.5 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500" required />
+                  <input name="password" type="password" placeholder="密碼 (預設: admin123)" className="w-full p-3.5 bg-slate-50 border rounded-xl outline-none focus:ring-2 focus:ring-blue-500" required />
+                  <button type="submit" className="w-full bg-slate-800 hover:bg-slate-900 text-white font-bold py-3.5 rounded-xl shadow-lg transition-colors">登入系統</button>
                 </form>
               </div>
             </div>
           )}
 
-          {toastMsg && <div className="fixed bottom-6 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-xl z-50 font-bold text-sm">{toastMsg}</div>}
+          {/* 全域 Toast 提示 */}
+          {toastMsg && (
+            <div className="fixed bottom-8 left-1/2 -translate-x-1/2 bg-slate-800 text-white px-6 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-in slide-in-from-bottom-8 fade-in z-[999] font-bold text-sm">
+              {toastMsg}
+            </div>
+          )}
         </div>
       );
     }
